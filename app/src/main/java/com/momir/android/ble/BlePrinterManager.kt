@@ -95,6 +95,7 @@ class BlePrinterManager(private val context: Context) {
     }
 
     companion object {
+        private const val TINY_SUBSCRIBE_NOTIFICATIONS = true
         private const val TAG = "MomirBle"
         private const val SCAN_TIMEOUT_MS = 12_000L
         private const val CONNECT_RETRY_DELAY_MS = 650L
@@ -474,6 +475,13 @@ class BlePrinterManager(private val context: Context) {
         fun connectAttempt(attempt: Int) {
             Log.i(TAG, "Connecting GATT attempt $attempt/$MAX_CONNECT_ATTEMPTS to ${device.address}")
 
+            var discoveryStarted = false
+            fun startDiscovery(g: BluetoothGatt) {
+                if (discoveryStarted) return
+                discoveryStarted = true
+                try { g.discoverServices() } catch (_: Exception) {}
+            }
+
             val callback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(
                     g: BluetoothGatt,
@@ -494,13 +502,12 @@ class BlePrinterManager(private val context: Context) {
                                 g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                             } catch (_: SecurityException) {
                             }
-                            try {
-                                g.requestMtu(if (profile.protocol == Protocol.TINY) 512 else 247)
-                            } catch (_: SecurityException) {
-                            }
-                            try {
-                                g.discoverServices()
-                            } catch (_: SecurityException) {
+                            if (profile.protocol == Protocol.TINY) {
+                                try { g.requestMtu(512) } catch (_: SecurityException) {}
+                                mainHandler.postDelayed({ startDiscovery(g) }, 1500) // fallback if MTU callback never arrives
+                            } else {
+                                try { g.requestMtu(247) } catch (_: SecurityException) {}
+                                try { g.discoverServices() } catch (_: SecurityException) {}
                             }
                         }
                     } else {
@@ -552,6 +559,7 @@ class BlePrinterManager(private val context: Context) {
                     } else {
                         Log.w(TAG, "MTU negotiation failed: status=$status")
                     }
+                    if (profile.protocol == Protocol.TINY) startDiscovery(g)
                 }
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -600,6 +608,12 @@ class BlePrinterManager(private val context: Context) {
                         // CCCD writes must be serialized, so finish connecting only
                         // after the last subscription completes (or times out).
                         notifyQueue.clear()
+                        if (TINY_SUBSCRIBE_NOTIFICATIONS) {
+                            profile.notifyUuids
+                                .mapNotNull { service?.getCharacteristic(it) }
+                                .forEach { notifyQueue.addLast(it) }
+                        }
+
                         profile.notifyUuids
                             .mapNotNull { service?.getCharacteristic(it) }
                             .forEach { notifyQueue.addLast(it) }
@@ -617,7 +631,8 @@ class BlePrinterManager(private val context: Context) {
                             },
                             NOTIFY_SETUP_TIMEOUT_MS,
                         )
-                        enableNextNotify(g)
+                        mainHandler.postDelayed({ enableNextNotify(g) }, 300)
+                        //enableNextNotify(g)
                     } else {
                         completeConnectOnce(writeChar != null)
                     }
@@ -804,26 +819,18 @@ class BlePrinterManager(private val context: Context) {
                     }
                 }
 
-                val ok =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        g.writeCharacteristic(
-                            ch,
-                            chunk,
-                            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
-                        ) == BluetoothStatusCodes.SUCCESS
-                    } else {
-                        ch.writeType =
-                            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-                        @Suppress("DEPRECATION")
-                        ch.value = chunk
-                        @Suppress("DEPRECATION")
-                        g.writeCharacteristic(ch)
-                    }
-
-                if (!ok) {
+                // Write the chunk; retry briefly if the GATT stack reports busy.
+                var code = writeChunk(g, ch, chunk)
+                var tries = 0
+                while (code != BluetoothStatusCodes.SUCCESS && tries < 20) {
+                    delay(10)
+                    code = writeChunk(g, ch, chunk)
+                    tries++
+                }
+                if (code != BluetoothStatusCodes.SUCCESS) {
                     lastError =
                         "BLE write failed at chunk ${i + 1}/${chunks.size} " +
-                                "(status=$lastGattStatus)"
+                                "(code=$code, status=$lastGattStatus)"
                     Log.w(TAG, lastError ?: "BLE write failed")
                     state = State.DISCONNECTED
                     return false
@@ -867,6 +874,7 @@ class BlePrinterManager(private val context: Context) {
             return false
         }
     }
+
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun disconnect() {
@@ -1129,6 +1137,18 @@ class BlePrinterManager(private val context: Context) {
             upper.contains("M02S") -> PROFILE_M02S
             upper.contains("M02") || upper.contains("T02") -> PROFILE_M02
             else -> PROFILE_M02S
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun writeChunk(g: BluetoothGatt, ch: BluetoothGattCharacteristic, chunk: ByteArray): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(ch, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+        } else {
+            ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            @Suppress("DEPRECATION") ch.value = chunk
+            @Suppress("DEPRECATION")
+            if (g.writeCharacteristic(ch)) BluetoothStatusCodes.SUCCESS else -1
         }
     }
 }
