@@ -18,6 +18,7 @@ import com.momir.android.data.AtomicBootstrapper
 import com.momir.android.data.CardRepository
 import com.momir.android.model.Creature
 import com.momir.android.print.ThermalRenderer
+import com.momir.android.print.TinyEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -207,7 +208,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        viewModelScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT) {
             _ui.value = _ui.value.copy(
                 message = "Preparing print...",
                 printerState = BlePrinterManager.State.PRINTING,
@@ -247,11 +248,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
 
-            val commands = ThermalRenderer.buildPrintCommands(
-                toPrint,
-                init = ble.profile.initCommands,
-                finalize = ble.profile.finalizeCommands,
-            )
+            val commands =
+                if (ble.profile.protocol == BlePrinterManager.Protocol.TINY) {
+                    TinyEncoder.build(
+                        ThermalRenderer.bitmapToMonochrome(toPrint),
+                        blackening = 3, energy = 9500, speed = 10,
+                        feedPadding = 12, lsbFirst = true, postFeeds = 2,
+                    )
+                } else {
+                    ThermalRenderer.buildPrintCommands(
+                        toPrint,
+                        init = ble.profile.initCommands,
+                        finalize = ble.profile.finalizeCommands,
+                    )
+                }
 
             val ok = ble.sendCommands(commands)
 
