@@ -20,6 +20,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
@@ -95,13 +96,20 @@ class BlePrinterManager(private val context: Context) {
     }
 
     companion object {
-        private const val TINY_SUBSCRIBE_NOTIFICATIONS = true
         private const val TAG = "MomirBle"
         private const val SCAN_TIMEOUT_MS = 12_000L
         private const val CONNECT_RETRY_DELAY_MS = 650L
         private const val MAX_CONNECT_ATTEMPTS = 2
         private const val NOTIFY_SETUP_TIMEOUT_MS = 4_000L
+        private const val NOTIFY_SETUP_START_DELAY_MS = 300L
+        private const val TINY_DISCOVERY_FALLBACK_MS = 1_500L
         private const val TINY_PAUSE_TIMEOUT_MS = 5_000L
+        private const val TINY_DONE_TIMEOUT_MS = 60_000L
+        private const val WRITE_RETRY_LIMIT = 20
+        private const val WRITE_RETRY_DELAY_MS = 10L
+
+        // Set to false if CCCD writes ever hang again; printing works without them.
+        private const val TINY_SUBSCRIBE_NOTIFICATIONS = true
 
         // Phomemo family (M02/M04)
         private val SERVICE_UUID: UUID =
@@ -252,12 +260,19 @@ class BlePrinterManager(private val context: Context) {
     @Volatile
     private var flowControlSubscribed = false
 
-    // TINY family: notification setup queue and pause/resume flow control
+    // TINY family: notification setup queue, flow control and completion state
     private val notifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
     private var onNotifySetupDone: (() -> Unit)? = null
 
     @Volatile
     private var tinyPaused = false
+
+    @Volatile
+    private var tinyJobDone = false
+
+    @Volatile
+    private var tinyStatus: ByteArray? = null
+
     private val tinyRx = ByteArrayOutputStream()
 
     var state: State = State.DISCONNECTED
@@ -475,11 +490,17 @@ class BlePrinterManager(private val context: Context) {
         fun connectAttempt(attempt: Int) {
             Log.i(TAG, "Connecting GATT attempt $attempt/$MAX_CONNECT_ATTEMPTS to ${device.address}")
 
+            // TINY: GATT operations run strictly one after another
+            // (MTU -> service discovery -> CCCD writes) to avoid a stuck
+            // "device busy" state in Android's BluetoothGatt.
             var discoveryStarted = false
             fun startDiscovery(g: BluetoothGatt) {
                 if (discoveryStarted) return
                 discoveryStarted = true
-                try { g.discoverServices() } catch (_: Exception) {}
+                try {
+                    g.discoverServices()
+                } catch (_: Exception) {
+                }
             }
 
             val callback = object : BluetoothGattCallback() {
@@ -503,11 +524,24 @@ class BlePrinterManager(private val context: Context) {
                             } catch (_: SecurityException) {
                             }
                             if (profile.protocol == Protocol.TINY) {
-                                try { g.requestMtu(512) } catch (_: SecurityException) {}
-                                mainHandler.postDelayed({ startDiscovery(g) }, 1500) // fallback if MTU callback never arrives
+                                try {
+                                    g.requestMtu(512)
+                                } catch (_: SecurityException) {
+                                }
+                                // Fallback in case the MTU callback never arrives.
+                                mainHandler.postDelayed(
+                                    { startDiscovery(g) },
+                                    TINY_DISCOVERY_FALLBACK_MS,
+                                )
                             } else {
-                                try { g.requestMtu(247) } catch (_: SecurityException) {}
-                                try { g.discoverServices() } catch (_: SecurityException) {}
+                                try {
+                                    g.requestMtu(247)
+                                } catch (_: SecurityException) {
+                                }
+                                try {
+                                    g.discoverServices()
+                                } catch (_: SecurityException) {
+                                }
                             }
                         }
                     } else {
@@ -559,7 +593,9 @@ class BlePrinterManager(private val context: Context) {
                     } else {
                         Log.w(TAG, "MTU negotiation failed: status=$status")
                     }
-                    if (profile.protocol == Protocol.TINY) startDiscovery(g)
+                    if (profile.protocol == Protocol.TINY) {
+                        startDiscovery(g)
+                    }
                 }
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -613,10 +649,6 @@ class BlePrinterManager(private val context: Context) {
                                 .mapNotNull { service?.getCharacteristic(it) }
                                 .forEach { notifyQueue.addLast(it) }
                         }
-
-                        profile.notifyUuids
-                            .mapNotNull { service?.getCharacteristic(it) }
-                            .forEach { notifyQueue.addLast(it) }
                         Log.i(TAG, "Subscribing to ${notifyQueue.size} TINY notify characteristics")
 
                         onNotifySetupDone = { completeConnectOnce(true) }
@@ -631,8 +663,10 @@ class BlePrinterManager(private val context: Context) {
                             },
                             NOTIFY_SETUP_TIMEOUT_MS,
                         )
-                        mainHandler.postDelayed({ enableNextNotify(g) }, 300)
-                        //enableNextNotify(g)
+                        mainHandler.postDelayed(
+                            { enableNextNotify(g) },
+                            NOTIFY_SETUP_START_DELAY_MS,
+                        )
                     } else {
                         completeConnectOnce(writeChar != null)
                     }
@@ -701,6 +735,27 @@ class BlePrinterManager(private val context: Context) {
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    private fun writeChunk(
+        g: BluetoothGatt,
+        ch: BluetoothGattCharacteristic,
+        chunk: ByteArray,
+    ): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(
+                ch,
+                chunk,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE,
+            )
+        } else {
+            ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            @Suppress("DEPRECATION")
+            ch.value = chunk
+            @Suppress("DEPRECATION")
+            if (g.writeCharacteristic(ch)) BluetoothStatusCodes.SUCCESS else -1
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     suspend fun sendCommands(commands: ByteArray): Boolean {
         val g = gatt ?: return false
         val ch = writeChar ?: return false
@@ -745,6 +800,8 @@ class BlePrinterManager(private val context: Context) {
                 drainFlowCredits()
             }
             if (tiny) {
+                tinyJobDone = false
+                tinyStatus = null
                 synchronized(tinyRx) { tinyRx.reset() }
             }
 
@@ -764,6 +821,8 @@ class BlePrinterManager(private val context: Context) {
                     .chunked(effectiveChunkSize)
                     .map { it.toByteArray() }
 
+            val sendStart = SystemClock.elapsedRealtime()
+
             for ((i, chunk) in chunks.withIndex()) {
                 if (state == State.DISCONNECTED) {
                     lastError =
@@ -775,10 +834,17 @@ class BlePrinterManager(private val context: Context) {
 
                 // TINY printers ask the phone to pause/resume via notifications.
                 if (tiny && tinyPaused) {
+                    val waitStart = SystemClock.elapsedRealtime()
+                    Log.d(TAG, "TINY paused before chunk ${i + 1}/${chunks.size}; waiting")
                     val resumed = withTimeoutOrNull(TINY_PAUSE_TIMEOUT_MS) {
                         while (tinyPaused) delay(5)
                         true
                     } ?: false
+                    Log.d(
+                        TAG,
+                        "TINY wait ended after ${SystemClock.elapsedRealtime() - waitStart} ms " +
+                                "(resumed=$resumed)",
+                    )
                     if (!resumed) {
                         Log.w(TAG, "No TINY resume within ${TINY_PAUSE_TIMEOUT_MS}ms; continuing")
                         tinyPaused = false
@@ -822,8 +888,8 @@ class BlePrinterManager(private val context: Context) {
                 // Write the chunk; retry briefly if the GATT stack reports busy.
                 var code = writeChunk(g, ch, chunk)
                 var tries = 0
-                while (code != BluetoothStatusCodes.SUCCESS && tries < 20) {
-                    delay(10)
+                while (code != BluetoothStatusCodes.SUCCESS && tries < WRITE_RETRY_LIMIT) {
+                    delay(WRITE_RETRY_DELAY_MS)
                     code = writeChunk(g, ch, chunk)
                     tries++
                 }
@@ -861,7 +927,37 @@ class BlePrinterManager(private val context: Context) {
                 }
             }
 
-            delay(2000)
+            Log.i(
+                TAG,
+                "All ${chunks.size} chunks written in " +
+                        "${SystemClock.elapsedRealtime() - sendStart} ms",
+            )
+
+            if (tiny && TINY_SUBSCRIBE_NOTIFICATIONS) {
+                // The printer answers the final A3 state query when the job is done.
+                val done = withTimeoutOrNull(TINY_DONE_TIMEOUT_MS) {
+                    while (!tinyJobDone) delay(50)
+                    true
+                } ?: false
+                Log.i(
+                    TAG,
+                    if (done) "Printer reported job done" else "No completion reply; continuing",
+                )
+
+                // A non-zero first status byte is treated as a failed print.
+                // Calibrate this against real faults (cover open, no paper).
+                val status = tinyStatus
+                if (done && status != null && status.isNotEmpty() && status[0] != 0.toByte()) {
+                    val hex = status.joinToString(" ") { "%02x".format(it) }
+                    lastError = "Printer needs attention (status $hex). Check paper and cover, then print again."
+                    Log.w(TAG, lastError ?: "TINY status fault")
+                    state = State.READY
+                    return false
+                }
+            } else {
+                delay(2000)
+            }
+
             state = State.READY
             lastError = null
             return true
@@ -874,7 +970,6 @@ class BlePrinterManager(private val context: Context) {
             return false
         }
     }
-
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun disconnect() {
@@ -908,6 +1003,8 @@ class BlePrinterManager(private val context: Context) {
         notifyQueue.clear()
         onNotifySetupDone = null
         tinyPaused = false
+        tinyJobDone = false
+        tinyStatus = null
         synchronized(tinyRx) { tinyRx.reset() }
     }
 
@@ -960,6 +1057,27 @@ class BlePrinterManager(private val context: Context) {
 
     private fun onTinyNotify(uuid: UUID, value: ByteArray) {
         Log.d(TAG, "TINY notify $uuid: ${value.joinToString("") { "%02x".format(it) }}")
+
+        // Reply to the final A3 state query: the printer has processed the job.
+        if (
+            value.size >= 6 &&
+            value[0] == 0x51.toByte() &&
+            value[1] == 0x78.toByte() &&
+            value[2] == 0xA3.toByte()
+        ) {
+            val len = (value[4].toInt() and 0xFF) or ((value[5].toInt() and 0xFF) shl 8)
+            if (value.size >= 6 + len) {
+                val payload = value.copyOfRange(6, 6 + len)
+                tinyStatus = payload
+                Log.i(
+                    TAG,
+                    "TINY status payload: " +
+                            payload.joinToString(" ") { "%02x".format(it) },
+                )
+            }
+            tinyJobDone = true
+        }
+
         synchronized(tinyRx) {
             tinyRx.write(value)
             val buf = tinyRx.toByteArray()
@@ -1137,18 +1255,6 @@ class BlePrinterManager(private val context: Context) {
             upper.contains("M02S") -> PROFILE_M02S
             upper.contains("M02") || upper.contains("T02") -> PROFILE_M02
             else -> PROFILE_M02S
-        }
-    }
-
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private fun writeChunk(g: BluetoothGatt, ch: BluetoothGattCharacteristic, chunk: ByteArray): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            g.writeCharacteristic(ch, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
-        } else {
-            ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            @Suppress("DEPRECATION") ch.value = chunk
-            @Suppress("DEPRECATION")
-            if (g.writeCharacteristic(ch)) BluetoothStatusCodes.SUCCESS else -1
         }
     }
 }
