@@ -72,6 +72,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.momir.android.ui.MainViewModel
 import kotlinx.coroutines.launch
+import androidx.compose.material3.Slider
+import kotlin.math.roundToInt
+
 
 class MainActivity : ComponentActivity() {
     private val vm by viewModels<MainViewModel>()
@@ -201,6 +204,28 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = ui.showPreviewImage, onCheckedChange = { vm.setShowPreviewImage(it) })
                         Text("Show preview image")
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Print darkness: ${ui.blackening} (1 = light, 5 = dark)",
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Slider(
+                            value = ui.blackening.toFloat(),
+                            onValueChange = { vm.setBlackening(it.roundToInt()) },
+                            valueRange = 1f..5f,
+                            steps = 3,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Applies to the X6H printer.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textMuted,
+                        )
                     }
                 }
             }

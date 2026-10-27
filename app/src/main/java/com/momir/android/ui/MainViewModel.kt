@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.content.Context
 import androidx.annotation.RequiresPermission
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
@@ -28,6 +29,9 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
+private const val PREFS_NAME = "momir_settings"
+private const val KEY_BLACKENING = "blackening"
+private const val DEFAULT_BLACKENING = 3
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     enum class BootstrapMode {
         INITIAL,
@@ -50,9 +54,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val printerState: BlePrinterManager.State = BlePrinterManager.State.DISCONNECTED,
         val printerName: String? = null,
         val printWidth: Int = 576,
+        val blackening: Int = DEFAULT_BLACKENING,
     )
-
-    private val _ui = MutableStateFlow(UiState())
+    private val prefs = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val _ui = MutableStateFlow(
+        UiState(
+            blackening = prefs.getInt(KEY_BLACKENING, DEFAULT_BLACKENING).coerceIn(1, 5),
+        ),
+    )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private val ble = BlePrinterManager(app.applicationContext)
@@ -126,6 +135,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setIncludeFunny(v: Boolean) {
         _ui.value = _ui.value.copy(includeFunny = v)
+    }
+    fun setBlackening(level: Int) {
+        val v = level.coerceIn(1, 5)
+        _ui.value = _ui.value.copy(blackening = v)
+        prefs.edit().putInt(KEY_BLACKENING, v).apply()
     }
 
     fun setShowPreviewImage(v: Boolean) {
@@ -252,7 +266,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (ble.profile.protocol == BlePrinterManager.Protocol.TINY) {
                     TinyEncoder.build(
                         ThermalRenderer.bitmapToMonochrome(toPrint),
-                        blackening = 3, energy = 9500, speed = 10,
+                        blackening = _ui.value.blackening, energy = 9500, speed = 10,
                         feedPadding = 12, lsbFirst = true, postFeeds = 2,
                     )
                 } else {
