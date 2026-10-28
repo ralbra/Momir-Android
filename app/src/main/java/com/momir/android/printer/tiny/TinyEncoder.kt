@@ -1,4 +1,4 @@
-package com.momir.android.print
+package com.momir.android.printer.tiny
 
 import android.graphics.Bitmap
 import android.graphics.Color

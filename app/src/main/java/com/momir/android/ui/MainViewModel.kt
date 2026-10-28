@@ -9,17 +9,18 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.content.Context
+import android.util.Log
 import androidx.annotation.RequiresPermission
-import androidx.core.graphics.createBitmap
-import androidx.core.graphics.scale
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.momir.android.ble.BlePrinterManager
+import com.momir.android.ble.BleTransport
 import com.momir.android.data.AtomicBootstrapper
 import com.momir.android.data.CardRepository
 import com.momir.android.model.Creature
-import com.momir.android.print.ThermalRenderer
-import com.momir.android.print.TinyEncoder
+import com.momir.android.printer.PrintOptions
+import com.momir.android.printer.PrinterDrivers
+import com.momir.android.render.CardRenderer
+import com.momir.android.printer.PrinterDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +29,7 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+
 
 private const val PREFS_NAME = "momir_settings"
 private const val KEY_BLACKENING = "blackening"
@@ -51,7 +53,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val card: Creature? = null,
         val imageUrl: String? = null,
         val previewBitmap: Bitmap? = null,
-        val printerState: BlePrinterManager.State = BlePrinterManager.State.DISCONNECTED,
+        val printerState: BleTransport.State = BleTransport.State.DISCONNECTED,
         val printerName: String? = null,
         val printWidth: Int = 576,
         val blackening: Int = DEFAULT_BLACKENING,
@@ -64,7 +66,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
-    private val ble = BlePrinterManager(app.applicationContext)
+    private val ble = BleTransport<PrinterDriver>(app.applicationContext, PrinterDrivers::forName)
     private val repo = CardRepository(AtomicBootstrapper(app.filesDir))
     private val http = OkHttpClient()
 
@@ -189,7 +191,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun connectPrinter() {
         _ui.value = _ui.value.copy(
             message = "Scanning for printer...",
-            printerState = BlePrinterManager.State.CONNECTING,
+            printerState = BleTransport.State.CONNECTING,
         )
 
         ble.connect { ok ->
@@ -199,7 +201,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.value = _ui.value.copy(
                 printerState = ps,
                 printerName = ble.deviceName,
-                printWidth = ble.profile.printWidth,
+                printWidth = ble.target?.printWidth ?: 576,
                 message = if (ok) "Connected to ${ble.deviceName}" else failure,
             )
         }
@@ -209,76 +211,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.value = _ui.value.copy(
             printerState = ble.state,
             printerName = ble.deviceName,
-            printWidth = ble.profile.printWidth,
+            printWidth = ble.target?.printWidth ?: 576,
         )
     }
 
     fun printCurrentCard() {
         val state = _ui.value
         val card = state.card ?: return
+        val driver = ble.target
 
-        if (ble.state != BlePrinterManager.State.READY) {
+        if (ble.state != BleTransport.State.READY || driver == null) {
             _ui.value = state.copy(message = "Printer not connected")
             return
         }
 
-        viewModelScope.launch(Dispatchers.IO) @androidx.annotation.RequiresPermission(android.Manifest.permission.BLUETOOTH_CONNECT) {
-            _ui.value = _ui.value.copy(
+        viewModelScope.launch(Dispatchers.IO) @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT) {        _ui.value = _ui.value.copy(
                 message = "Preparing print...",
-                printerState = BlePrinterManager.State.PRINTING,
+                printerState = BleTransport.State.PRINTING,
             )
 
-            // Preview is normally 576 dots wide. Reuse it only for printer
-            // profiles whose source render width is also 576. M02 Pro is
-            // rendered natively at 624 dots so GS v 0 receives exactly
-            // 78 bytes per raster line.
+            // The preview is 576 dots wide. Reuse it only for printers that
+            // render natively at 576; the others (e.g. 384 or 624) get their own render.
             val rendered =
-                if (
-                    state.previewBitmap != null &&
-                    ble.profile.renderWidth == 576
-                ) {
+                if (state.previewBitmap != null && driver.renderWidth == 576) {
                     state.previewBitmap
                 } else {
-                    ThermalRenderer.renderCardBitmap(
+                    CardRenderer.renderCardBitmap(
                         card,
                         fetchArtCrop(card.name),
-                        printWidth = ble.profile.renderWidth,
+                        printWidth = driver.renderWidth,
                     )
                 }
 
-            // Rotation is a model property (M04-style), not a consequence of
-            // being wider than 576 pixels. This prevents the 624-dot M02 Pro
-            // from being rotated by the old "printWidth > 576" heuristic.
-            val toPrint =
-                if (ble.profile.rotateForPrint) {
-                    rotateAndCenter(
-                        rendered,
-                        ble.profile.printWidth,
-                    )
-                } else {
-                    resizeToWidth(
-                        rendered,
-                        ble.profile.printWidth,
-                    )
-                }
-
-            val commands =
-                if (ble.profile.protocol == BlePrinterManager.Protocol.TINY) {
-                    TinyEncoder.build(
-                        ThermalRenderer.bitmapToMonochrome(toPrint),
-                        blackening = _ui.value.blackening, energy = 9500, speed = 10,
-                        feedPadding = 12, lsbFirst = true, postFeeds = 2,
-                    )
-                } else {
-                    ThermalRenderer.buildPrintCommands(
-                        toPrint,
-                        init = ble.profile.initCommands,
-                        finalize = ble.profile.finalizeCommands,
-                    )
-                }
-
-            val ok = ble.sendCommands(commands)
-
+            val commands = driver.encode(
+                driver.prepare(rendered),
+                PrintOptions(darkness = _ui.value.blackening),
+            )
+            var ok = false
+            try {
+                ok = ble.sendCommands(commands)
+            } catch (_: SecurityException){
+                Log.w("Momir Main", "No Bluetooth permissions given")
+            }
             _ui.value = _ui.value.copy(
                 printerState = ble.state,
                 message =
@@ -290,7 +264,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
-
     private fun fetchArtCrop(name: String): Bitmap? {
         val network = try {
             val req = Request.Builder()
@@ -400,12 +373,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun generatePreview(card: Creature) {
         viewModelScope.launch(Dispatchers.IO) {
             val art = fetchArtCrop(card.name)
-            val preview =
-                ThermalRenderer.renderCardBitmap(
-                    card,
-                    art,
-                    printWidth = 576,
-                )
+            val preview = CardRenderer.renderCardBitmap(card, art, printWidth = 576)
             _ui.value = _ui.value.copy(previewBitmap = preview)
         }
     }
@@ -432,46 +400,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             AtomicBootstrapper.Stage.LOADING ->
                 "Loading local creature database..."
         }
-    }
-
-    private fun resizeToWidth(bitmap: Bitmap, width: Int): Bitmap {
-        if (bitmap.width == width) return bitmap
-
-        val h =
-            (
-                bitmap.height.toFloat() *
-                    (width.toFloat() / bitmap.width.toFloat())
-                ).toInt()
-
-        return bitmap.scale(width, h.coerceAtLeast(1))
-    }
-
-    private fun rotateAndCenter(
-        bitmap: Bitmap,
-        printWidth: Int,
-    ): Bitmap {
-        val rotated = createBitmap(
-            bitmap.height,
-            bitmap.width,
-        )
-
-        val canvas = Canvas(rotated)
-        canvas.rotate(90f)
-        canvas.translate(0f, -bitmap.height.toFloat())
-        canvas.drawBitmap(bitmap, 0f, 0f, null)
-
-        val out = createBitmap(
-            printWidth,
-            rotated.height,
-        )
-
-        val c = Canvas(out)
-        c.drawColor(Color.WHITE)
-
-        val x = (printWidth - rotated.width) / 2f
-        c.drawBitmap(rotated, x, 0f, null)
-
-        return out
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)

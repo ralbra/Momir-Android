@@ -80,7 +80,7 @@ Then trigger the workflow:
 
 ## Printer Support
 
-Current BLE printer matching and profile selection are implemented in `BlePrinterManager`.
+Current BLE printer matching and profile selection are implemented in `BleTransport`.
 
 | Printer model / name pattern | Status | Notes |
 | --- | --- | --- |
