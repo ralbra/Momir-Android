@@ -174,8 +174,8 @@ Found with a `bleak` scan on Linux (see the workaround below).
 | `AE30` | `AE01` | write without response | **Yes, print data** |
 | `AE30` | `AE02` | notify | **Yes, flow control and status replies** |
 | `AE30` | `AE03` | write without response | No |
-| `AE30` | `AE04` | notify | Subscribed, never sent anything in our tests |
-| `AE30` | `AE05` | indicate | Subscribed, never sent anything in our tests |
+| `AE30` | `AE04` | notify | No (never sent anything in our tests, not subscribed) |
+| `AE30` | `AE05` | indicate | No (never sent anything in our tests, not subscribed) |
 | `AE30` | `AE10` | read, write | No |
 | `AE3A` | `AE3B` | write without response | No |
 | `AE3A` | `AE3C` | notify | No |
@@ -213,7 +213,7 @@ The CRC is CRC-8 with polynomial `0x07` and initial value 0. The job the app sen
 
 The printer sends its notifications on `AE02`:
 
-- **Pause:** `51 78 AE 01 01 00 10 70 FF`. The app stops sending (it waits up to 5 s).
+- **Pause:** `51 78 AE 01 01 00 10 70 FF`. The app stops sending (it waits up to 20 s). Pauses of 4 s and 7.5 s were observed on large cards.
 - **Resume:** `51 78 AE 01 01 00 00 00 FF`. The app continues.
 - **Job finished:** the answer to the final `A3` query, `51 78 A3 01 03 00 <3 payload bytes> <crc> FF`.
   It arrives only after the printer has worked through the whole job (about 14-17 s for a card).

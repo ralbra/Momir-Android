@@ -35,7 +35,7 @@ class TinyFlow(
     interChunkDelayMs = 0,
 ) {
     companion object {
-        private const val PAUSE_TIMEOUT_MS = 5_000L
+        private const val PAUSE_TIMEOUT_MS = 20_000L
         private const val DONE_TIMEOUT_MS = 60_000L
 
         // 51 78 AE 01 01 00 10 70 FF  /  51 78 AE 01 01 00 00 00 FF

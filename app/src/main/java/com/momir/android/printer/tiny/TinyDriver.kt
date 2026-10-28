@@ -35,12 +35,13 @@ class TinyDriver(private val config: TinyConfig = TinyConfig()) : PrinterDriver 
     override val renderWidth: Int = PRINT_WIDTH
     override val printWidth: Int = PRINT_WIDTH
 
-    // AE30 service, AE01 write (no response); AE02/AE04/AE05 notify.
+    // AE30 service, AE01 write (no response), AE02 notify (flow control and status replies).
+    // AE04 (notify) and AE05 (indicate) exist but never sent anything in our tests.
     // MTU, discovery and CCCD writes run strictly in sequence on this printer.
     override val gatt: GattSpec = GattSpec(
         service = uuid("ae30"),
         write = uuid("ae01"),
-        notify = listOf(uuid("ae02"), uuid("ae04"), uuid("ae05")),
+        notify = listOf(uuid("ae02")),
         mtuRequest = 512,
         chunkSize = 180,
         sequentialSetup = true,

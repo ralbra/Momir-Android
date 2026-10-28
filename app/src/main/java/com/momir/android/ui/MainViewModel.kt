@@ -345,6 +345,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return network ?: loadBundledDummyArt() ?: createGeneratedDummyArt(name)
     }
 
+    @SuppressLint("DiscouragedApi")
     private fun loadBundledDummyArt(): Bitmap? {
         val app = getApplication<Application>()
 
