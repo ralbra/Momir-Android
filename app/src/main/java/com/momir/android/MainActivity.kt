@@ -45,6 +45,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
@@ -69,9 +70,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.momir.android.ble.BleTransport
 import com.momir.android.ui.MainViewModel
 import kotlinx.coroutines.launch
-import androidx.compose.material3.Slider
 import kotlin.math.roundToInt
 
 
@@ -118,7 +119,7 @@ class MainActivity : ComponentActivity() {
             }
 
             MaterialTheme(colorScheme = scheme) {
-                MomirScreen(vm)
+                MomirScreen(vm, onRequestPermissions = { requestBtPermissions() })
             }
         }
     }
@@ -136,7 +137,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun MomirScreen(vm: MainViewModel = viewModel()) {
+private fun MomirScreen(
+    vm: MainViewModel = viewModel(),
+    onRequestPermissions: () -> Unit,
+) {
     val ui by vm.ui.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val surfaceText = if (darkTheme) Color(0xFFE7EDF8) else MaterialTheme.colorScheme.onSurface
@@ -171,6 +175,20 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
             listOf(Color(0xFFF4F8FF), Color(0xFFEDF2FF), Color(0xFFE8F5F1))
         },
     )
+
+    // One action button: Connect -> Connecting... -> Print -> Printing...
+    val actionLabel = when (ui.printerState) {
+        BleTransport.State.DISCONNECTED -> "Connect"
+        BleTransport.State.CONNECTING -> "Connecting..."
+        BleTransport.State.READY -> "Print"
+        BleTransport.State.PRINTING -> "Printing..."
+    }
+    val actionEnabled = when (ui.printerState) {
+        BleTransport.State.DISCONNECTED -> !ui.loading
+        BleTransport.State.READY -> ui.card != null
+        BleTransport.State.CONNECTING,
+        BleTransport.State.PRINTING -> false
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -242,146 +260,137 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    shadowElevation = 8.dp,
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .background(headerGradient)
-                            .padding(horizontal = 18.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(28.dp),
+                        shadowElevation = 8.dp,
+                        color = Color.Transparent,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                text = "Momir Printer",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = Color.White,
-                                fontWeight = FontWeight.ExtraBold,
-                            )
-
-                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                Icon(
-                                    imageVector = Icons.Filled.Menu,
-                                    contentDescription = "Open options menu",
-                                    tint = Color.White,
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Roll creatures. Preview exactly what prints. Send over BLE.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (darkTheme) Color(0xFFDCE9FF) else Color(0xFFEAF2FF),
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                        Column(
+                            modifier = Modifier
+                                .background(headerGradient)
+                                .padding(horizontal = 18.dp, vertical = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                StatusPill(label = "Printer ${ui.printerState}")
-                                if (!ui.printerName.isNullOrBlank()) {
-                                    StatusPill(label = ui.printerName!!)
-                                }
-                                StatusPill(label = "Cards ${ui.totalCreatures}")
-                            }
-
-                        }
-
-                        Button(
-                            onClick = {
-                                try {
-                                vm.connectPrinter()
-                                } catch (_: SecurityException){
-
-                                }
-                            },
-                            enabled = !ui.loading,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (darkTheme) Color(0xFFFFC857) else Color(0xFFFFB703),
-                                contentColor = Color(0xFF111111),
-                            ),
-                        ) {
-                            Text("Connect Printer", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = controlSurface,
-                    contentColor = surfaceText,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            text = "Mana Value",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = sectionTitleText,
-                        )
-
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items((0..16).toList()) { mv ->
-                                FilterChip(
-                                    selected = ui.selectedMv == mv,
-                                    onClick = { vm.setMv(mv) },
-                                    enabled = !ui.loading,
-                                    label = { Text(mv.toString()) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = if (darkTheme) Color(0xFF0A8E71) else Color(0xFF0B6E4F),
-                                        selectedLabelColor = Color.White,
-                                    ),
+                                Text(
+                                    text = "Momir Printer",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
                                 )
+
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Menu,
+                                        contentDescription = "Open options menu",
+                                        tint = Color.White,
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    StatusPill(label = "Printer ${ui.printerState}")
+                                    if (!ui.printerName.isNullOrBlank()) {
+                                        StatusPill(label = ui.printerName!!)
+                                    }
+                                    StatusPill(label = "Cards ${ui.totalCreatures}")
+                                }
                             }
                         }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(
-                                onClick = { vm.roll() },
-                                enabled = !ui.loading,
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = primaryAction),
-                            ) {
-                                Text("Roll", color = primaryActionText, fontWeight = FontWeight.Bold)
-                            }
-
-                            OutlinedButton(
-                                onClick = { vm.printCurrentCard() },
-                                enabled = ui.card != null,
-                                modifier = Modifier.weight(1f),
-                                border = BorderStroke(1.dp, secondaryAction),
-                            ) {
-                                Text("Print", fontWeight = FontWeight.Bold, color = secondaryActionText)
-                            }
-                        }
-
-                        Text(
-                            text = ui.message,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = messageText,
-                        )
                     }
                 }
-            }
+
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = controlSurface,
+                        contentColor = surfaceText,
+                        tonalElevation = 2.dp,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                text = "Mana Value",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = sectionTitleText,
+                            )
+
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items((0..16).toList()) { mv ->
+                                    FilterChip(
+                                        selected = ui.selectedMv == mv,
+                                        onClick = { vm.setMv(mv) },
+                                        enabled = !ui.loading,
+                                        label = { Text(mv.toString()) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = if (darkTheme) Color(0xFF0A8E71) else Color(0xFF0B6E4F),
+                                            selectedLabelColor = Color.White,
+                                        ),
+                                    )
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Button(
+                                    onClick = { vm.roll() },
+                                    enabled = !ui.loading,
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = primaryAction),
+                                ) {
+                                    Text("Roll", color = primaryActionText, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = {
+                                        if (
+                                            ui.printerState == BleTransport.State.DISCONNECTED &&
+                                            !vm.hasBluetoothPermissions()
+                                        ) {
+                                            onRequestPermissions()
+                                        } else {
+                                            vm.onPrimaryAction()
+                                        }
+                                    },
+                                    enabled = actionEnabled,
+                                    modifier = Modifier.weight(1f),
+                                    border = BorderStroke(1.dp, secondaryAction),
+                                ) {
+                                    Text(
+                                        text = actionLabel,
+                                        fontWeight = FontWeight.Bold,
+                                        color = secondaryActionText.copy(
+                                            alpha = if (actionEnabled) 1f else 0.5f,
+                                        ),
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = ui.message,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = messageText,
+                            )
+                        }
+                    }
+                }
 
                 if (ui.showPreviewImage) {
                     ui.card?.let { c ->
@@ -428,60 +437,31 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
                     }
                 }
 
-            item {
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = previewSurface,
-                    contentColor = surfaceText,
-                    tonalElevation = 1.dp,
-                    shadowElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(22.dp),
+                        color = previewSurface,
+                        contentColor = surfaceText,
+                        tonalElevation = 1.dp,
+                        shadowElevation = 1.dp,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(
-                            text = "Print Preview",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = sectionTitleText,
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, previewBorder),
-                            modifier = Modifier.fillMaxWidth(),
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            if (!ui.showPreviewImage) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 28.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    Text(
-                                        text = "Preview hidden for fun",
-                                        color = textMuted,
-                                    )
-                                }
-                            } else {
-                                ui.previewBitmap?.let { preview ->
-                                    Image(
-                                        bitmap = preview.asImageBitmap(),
-                                        contentDescription = "Print preview",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp)),
-                                    )
-                                } ?: ui.imageUrl?.let { url ->
-                                    AsyncImage(
-                                        model = url,
-                                        contentDescription = "Card image",
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp)),
-                                    )
-                                } ?: run {
+                            Text(
+                                text = "Print Preview",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = sectionTitleText,
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                border = BorderStroke(1.dp, previewBorder),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                if (!ui.showPreviewImage) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -489,20 +469,49 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         Text(
-                                            text = "Roll a card to see preview",
+                                            text = "Preview hidden for fun",
                                             color = textMuted,
                                         )
+                                    }
+                                } else {
+                                    ui.previewBitmap?.let { preview ->
+                                        Image(
+                                            bitmap = preview.asImageBitmap(),
+                                            contentDescription = "Print preview",
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp)),
+                                        )
+                                    } ?: ui.imageUrl?.let { url ->
+                                        AsyncImage(
+                                            model = url,
+                                            contentDescription = "Card image",
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp)),
+                                        )
+                                    } ?: run {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 28.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                        ) {
+                                            Text(
+                                                text = "Roll a card to see preview",
+                                                color = textMuted,
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            item {
-                Spacer(modifier = Modifier.height(10.dp))
-            }
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
             }
 
             if (ui.bootstrapping) {

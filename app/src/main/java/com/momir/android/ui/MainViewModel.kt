@@ -202,7 +202,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_CONNECT,
         ],
-    )fun connectPrinter() {
+    )private fun connectPrinter() {
         _ui.update { it.copy(message = "Scanning for printer...") }
 
         ble.connect { ok ->
@@ -226,7 +226,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
+    fun hasBluetoothPermissions(): Boolean = ble.hasBluetoothPermissions()
 
+    /** The one action button: connects when disconnected, prints when ready. */
+    fun onPrimaryAction() {
+        when (ble.state) {
+            BleTransport.State.DISCONNECTED -> connectSafely()
+            BleTransport.State.READY -> printCurrentCard()
+            BleTransport.State.CONNECTING,
+            BleTransport.State.PRINTING -> Unit
+        }
+    }
+
+    private fun connectSafely() {
+        try {
+            connectPrinter()
+        } catch (_: SecurityException) {
+            say("Bluetooth permission missing")
+        }
+    }
     fun printCurrentCard() {
         val state = _ui.value
         val card = state.card ?: return
