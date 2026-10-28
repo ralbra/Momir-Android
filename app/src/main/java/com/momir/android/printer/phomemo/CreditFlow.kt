@@ -6,6 +6,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val TAG = "MomirFlow"
 
@@ -73,7 +74,7 @@ class CreditFlow(private val fallbackChunkDelayMs: Long) : FlowControl {
         if (fallback || index < INITIAL_CREDIT_WINDOW) return
 
         val timeoutMs = if (confirmed) CREDIT_TIMEOUT_MS else CREDIT_DETECT_TIMEOUT_MS
-        val received = withTimeoutOrNull(timeoutMs) {
+        val received = withTimeoutOrNull(timeoutMs.milliseconds) {
             credits.receive()
             true
         } ?: false
@@ -93,8 +94,8 @@ class CreditFlow(private val fallbackChunkDelayMs: Long) : FlowControl {
 
     override suspend fun afterChunk(index: Int) {
         when {
-            fallback -> delay(fallbackChunkDelayMs)
-            index < INITIAL_CREDIT_WINDOW - 1 -> delay(INITIAL_WINDOW_DELAY_MS)
+            fallback -> delay(fallbackChunkDelayMs.milliseconds)
+            index < INITIAL_CREDIT_WINDOW - 1 -> delay(INITIAL_WINDOW_DELAY_MS.milliseconds)
             else -> {
                 // In confirmed credit mode the next beforeChunk waits for FF03.
             }

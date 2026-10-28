@@ -2,6 +2,7 @@ package com.momir.android.ble
 
 import kotlinx.coroutines.delay
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 sealed interface JobOutcome {
     object Done : JobOutcome
@@ -28,7 +29,7 @@ interface FlowControl {
     suspend fun afterChunk(index: Int) {}
 
     suspend fun finish(): JobOutcome {
-        delay(2000)
+        delay(2000.milliseconds)
         return JobOutcome.Done
     }
 }
@@ -41,7 +42,7 @@ open class TimedPacing(
     private val interChunkDelayMs: Long,
 ) : FlowControl {
     override suspend fun afterChunk(index: Int) {
-        if ((index + 1) % chunksPerBurst == 0) delay(burstDelayMs)
-        if (interChunkDelayMs > 0) delay(interChunkDelayMs)
+        if ((index + 1) % chunksPerBurst == 0) delay(burstDelayMs.milliseconds)
+        if (interChunkDelayMs > 0) delay(interChunkDelayMs.milliseconds)
     }
 }

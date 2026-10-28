@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 private const val TAG = "MomirFlow"
 
@@ -109,8 +110,8 @@ class TinyFlow(
 
         val waitStart = SystemClock.elapsedRealtime()
         Log.d(TAG, "TINY paused before chunk ${index + 1}; waiting")
-        val resumed = withTimeoutOrNull(PAUSE_TIMEOUT_MS) {
-            while (paused) delay(5)
+        val resumed = withTimeoutOrNull(PAUSE_TIMEOUT_MS.milliseconds) {
+            while (paused) delay(5.milliseconds)
             true
         } ?: false
         Log.d(
@@ -127,12 +128,12 @@ class TinyFlow(
     override suspend fun finish(): JobOutcome {
         if (!subscribe) {
             // Without notifications there is no completion reply to wait for.
-            delay(2000)
+            delay(2000.milliseconds)
             return JobOutcome.Done
         }
 
-        val done = withTimeoutOrNull(DONE_TIMEOUT_MS) {
-            while (!jobDone) delay(50)
+        val done = withTimeoutOrNull(DONE_TIMEOUT_MS.milliseconds) {
+            while (!jobDone) delay(50.milliseconds)
             true
         } ?: false
         Log.i(TAG, if (done) "Printer reported job done" else "No completion reply; continuing")

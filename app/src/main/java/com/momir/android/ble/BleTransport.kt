@@ -26,6 +26,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
 import java.util.UUID
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Protocol-free BLE transport: scans for a device that [resolve] recognises, connects,
@@ -377,12 +378,11 @@ class BleTransport<T : BleTarget>(
 
                         state = State.DISCONNECTED
                         writeChar = null
-                        if (status != BluetoothGatt.GATT_SUCCESS) {
-                            lastError =
-                                "GATT disconnected (status=$status). " +
-                                        "Check printer battery/temperature and retry."
+                        lastError = if (status != BluetoothGatt.GATT_SUCCESS) {
+                            "GATT disconnected (status=$status). " +
+                                    "Check printer battery/temperature and retry."
                         } else {
-                            lastError = "GATT disconnected"
+                            "GATT disconnected"
                         }
                         safelyCloseGatt(g)
                         if (g === gatt) {
@@ -571,7 +571,7 @@ class BleTransport<T : BleTarget>(
                 var code = writeChunk(g, ch, chunk)
                 var tries = 0
                 while (code != BluetoothStatusCodes.SUCCESS && tries < WRITE_RETRY_LIMIT) {
-                    delay(WRITE_RETRY_DELAY_MS)
+                    delay(WRITE_RETRY_DELAY_MS.milliseconds)
                     code = writeChunk(g, ch, chunk)
                     tries++
                 }

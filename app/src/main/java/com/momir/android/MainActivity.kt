@@ -36,7 +36,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -137,7 +136,6 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-@OptIn(ExperimentalMaterial3Api::class)
 private fun MomirScreen(vm: MainViewModel = viewModel()) {
     val ui by vm.ui.collectAsState()
     val darkTheme = isSystemInDarkTheme()
@@ -302,7 +300,13 @@ private fun MomirScreen(vm: MainViewModel = viewModel()) {
                         }
 
                         Button(
-                            onClick = { vm.connectPrinter() },
+                            onClick = {
+                                try {
+                                vm.connectPrinter()
+                                } catch (_: SecurityException){
+
+                                }
+                            },
                             enabled = !ui.loading,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (darkTheme) Color(0xFFFFC857) else Color(0xFFFFB703),

@@ -1,6 +1,7 @@
 package com.momir.android.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -138,6 +139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setIncludeFunny(v: Boolean) {
         _ui.value = _ui.value.copy(includeFunny = v)
     }
+    @SuppressLint("UseKtx")
     fun setBlackening(level: Int) {
         val v = level.coerceIn(1, 5)
         _ui.value = _ui.value.copy(blackening = v)
@@ -310,6 +312,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    @SuppressLint("UseKtx")
     private fun createGeneratedDummyArt(name: String): Bitmap {
         val width = 1024
         val height = 1024
