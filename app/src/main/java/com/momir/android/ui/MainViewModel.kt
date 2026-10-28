@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -71,6 +73,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = CardRepository(AtomicBootstrapper(app.filesDir))
     private val http = OkHttpClient()
 
+    private val printInProgress = AtomicBoolean(false)
+
+    private fun say(text: String) {
+        _ui.update { it.copy(message = text) }
+    }
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -88,6 +96,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     message = "Ready",
                     totalCreatures = total,
                 )
+                viewModelScope.launch {
+                    ble.stateFlow.collect { s ->
+                        _ui.update { it.copy(printerState = s) }
+                    }
+                }
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(
                     loading = false,
@@ -189,32 +202,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_CONNECT,
         ],
-    )
-    fun connectPrinter() {
-        _ui.value = _ui.value.copy(
-            message = "Scanning for printer...",
-            printerState = BleTransport.State.CONNECTING,
-        )
+    )fun connectPrinter() {
+        _ui.update { it.copy(message = "Scanning for printer...") }
 
         ble.connect { ok ->
-            val ps = ble.state
             val failure = ble.lastError ?: "Printer connect failed"
-
-            _ui.value = _ui.value.copy(
-                printerState = ps,
-                printerName = ble.deviceName,
-                printWidth = ble.target?.printWidth ?: 576,
-                message = if (ok) "Connected to ${ble.deviceName}" else failure,
-            )
+            _ui.update {
+                it.copy(
+                    printerName = ble.deviceName,
+                    printWidth = ble.target?.printWidth ?: 576,
+                    message = if (ok) "Connected to ${ble.deviceName}" else failure,
+                )
+            }
         }
     }
 
     fun syncPrinterState() {
-        _ui.value = _ui.value.copy(
-            printerState = ble.state,
-            printerName = ble.deviceName,
-            printWidth = ble.target?.printWidth ?: 576,
-        )
+        _ui.update {
+            it.copy(
+                printerState = ble.state,
+                printerName = ble.deviceName,
+                printWidth = ble.target?.printWidth ?: 576,
+            )
+        }
     }
 
     fun printCurrentCard() {
@@ -222,48 +232,76 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val card = state.card ?: return
         val driver = ble.target
 
-        if (ble.state != BleTransport.State.READY || driver == null) {
-            _ui.value = state.copy(message = "Printer not connected")
+        when (ble.state) {
+            BleTransport.State.PRINTING -> {
+                say("Already printing, please wait")
+                return
+            }
+
+            BleTransport.State.CONNECTING -> {
+                say("Printer is still connecting")
+                return
+            }
+
+            BleTransport.State.DISCONNECTED -> {
+                say("Printer not connected")
+                return
+            }
+
+            BleTransport.State.READY -> Unit
+        }
+        if (driver == null) {
+            say("Printer not connected")
             return
         }
 
-        viewModelScope.launch(Dispatchers.IO) @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT) {        _ui.value = _ui.value.copy(
-                message = "Preparing print...",
-                printerState = BleTransport.State.PRINTING,
-            )
+        // Covers the time before the transport switches to PRINTING (card rendering).
+        if (!printInProgress.compareAndSet(false, true)) {
+            say("Already printing, please wait")
+            return
+        }
 
-            // The preview is 576 dots wide. Reuse it only for printers that
-            // render natively at 576; the others (e.g. 384 or 624) get their own render.
-            val rendered =
-                if (state.previewBitmap != null && driver.renderWidth == 576) {
-                    state.previewBitmap
-                } else {
-                    CardRenderer.renderCardBitmap(
-                        card,
-                        fetchArtCrop(card.name),
-                        printWidth = driver.renderWidth,
-                    )
+        viewModelScope.launch(Dispatchers.IO) @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT) {
+            try {
+                say("Preparing ${card.name}...")
+
+                // The preview is 576 dots wide. Reuse it only for printers that
+                // render natively at 576; the others (e.g. 384 or 624) get their own render.
+                val rendered =
+                    if (state.previewBitmap != null && driver.renderWidth == 576) {
+                        state.previewBitmap
+                    } else {
+                        CardRenderer.renderCardBitmap(
+                            card,
+                            fetchArtCrop(card.name),
+                            printWidth = driver.renderWidth,
+                        )
+                    }
+
+                val commands = driver.encode(
+                    driver.prepare(rendered),
+                    PrintOptions(darkness = _ui.value.blackening),
+                )
+
+                say("Printing ${card.name}...")
+
+                var ok = false
+                try {
+                    ok = ble.sendCommands(commands)
+                } catch (_: SecurityException) {
+                    Log.w("Momir Main", "No Bluetooth permissions given")
                 }
 
-            val commands = driver.encode(
-                driver.prepare(rendered),
-                PrintOptions(darkness = _ui.value.blackening),
-            )
-            var ok = false
-            try {
-                ok = ble.sendCommands(commands)
-            } catch (_: SecurityException){
-                Log.w("Momir Main", "No Bluetooth permissions given")
-            }
-            _ui.value = _ui.value.copy(
-                printerState = ble.state,
-                message =
+                say(
                     if (ok) {
                         "Printed ${card.name}"
                     } else {
                         ble.lastError ?: "Print failed"
                     },
-            )
+                )
+            } finally {
+                printInProgress.set(false)
+            }
         }
     }
     private fun fetchArtCrop(name: String): Bitmap? {

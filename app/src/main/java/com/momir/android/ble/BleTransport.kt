@@ -7,7 +7,6 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
-import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.BluetoothLeScanner
@@ -22,15 +21,25 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.GuardedBy
 import androidx.annotation.RequiresPermission
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Protocol-free BLE transport: scans for a device that [resolve] recognises, connects,
  * subscribes to what the target's flow control needs, and writes byte streams.
+ *
+ * Threading: GATT callbacks arrive on binder threads while the UI and print code run on the
+ * main and IO threads. The connection [State] lives in a [StateFlow] and only changes through
+ * atomic transitions; the other shared fields are `@Volatile`, and the notification queue is
+ * guarded by [notifyLock].
  */
 class BleTransport<T : BleTarget>(
     private val context: Context,
@@ -62,31 +71,62 @@ class BleTransport<T : BleTarget>(
     private var scanCallback: ScanCallback? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var scanTimeoutTask: Runnable? = null
+
+    @Volatile
     private var gatt: BluetoothGatt? = null
+
+    @Volatile
     private var gattSpec: GattSpec? = null
+
+    @Volatile
     private var writeChar: BluetoothGattCharacteristic? = null
+
+    @Volatile
     private var negotiatedMtu: Int = 23
+
+    @Volatile
     private var lastGattStatus: Int = 0
 
     // Characteristics still to subscribe to (CCCD writes must run one at a time).
+    private val notifyLock = Any()
+
+    @GuardedBy("notifyLock")
     private val notifyQueue = ArrayDeque<BluetoothGattCharacteristic>()
+
+    @GuardedBy("notifyLock")
     private var onNotifySetupDone: (() -> Unit)? = null
 
     @Volatile
     private var flow: FlowControl = object : FlowControl {}
 
-    var state: State = State.DISCONNECTED
-        private set
+    private val _state = MutableStateFlow(State.DISCONNECTED)
+
+    /** Observable connection state; changes only through atomic transitions. */
+    val stateFlow: StateFlow<State> = _state.asStateFlow()
+
+    val state: State get() = _state.value
 
     /** The printer that was resolved for the current/last connection. */
+    @Volatile
     var target: T? = null
         private set
 
+    @Volatile
     var deviceName: String? = null
         private set
 
+    @Volatile
     var lastError: String? = null
         private set
+
+    /** Moves to [to] only if the current state is one of [allowedFrom]; returns whether it did. */
+    private fun transition(allowedFrom: Set<State>, to: State): Boolean {
+        while (true) {
+            val current = _state.value
+            if (current !in allowedFrom) return false
+            if (_state.compareAndSet(current, to)) return true
+        }
+    }
 
     fun hasBluetoothPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -119,7 +159,7 @@ class BleTransport<T : BleTarget>(
         fun fail(msg: String) {
             Log.w(TAG, msg)
             lastError = msg
-            state = State.DISCONNECTED
+            _state.value = State.DISCONNECTED
             onDone(false)
         }
 
@@ -127,8 +167,13 @@ class BleTransport<T : BleTarget>(
             fail("Bluetooth permissions missing")
             return
         }
-        if (state == State.CONNECTING || state == State.PRINTING) {
-            fail("Printer is busy ($state)")
+
+        // Atomic: a second connect (or a connect during a print) is rejected without
+        // touching the state of the operation that is already running.
+        if (!transition(setOf(State.DISCONNECTED, State.READY), State.CONNECTING)) {
+            lastError = "Printer is busy (${_state.value})"
+            Log.w(TAG, lastError ?: "Printer is busy")
+            onDone(false)
             return
         }
 
@@ -151,7 +196,6 @@ class BleTransport<T : BleTarget>(
         }
 
         lastError = null
-        state = State.CONNECTING
         scanner = sc
         scanTimeoutTask?.let { mainHandler.removeCallbacks(it) }
         scanCallback?.let {
@@ -274,7 +318,7 @@ class BleTransport<T : BleTarget>(
         if (resolved == null) {
             lastError = "No driver for printer ${name ?: device.address}"
             Log.w(TAG, lastError ?: "No driver")
-            state = State.DISCONNECTED
+            _state.value = State.DISCONNECTED
             onDone(false)
             return
         }
@@ -288,14 +332,14 @@ class BleTransport<T : BleTarget>(
         lastGattStatus = 0
         resetFlow()
 
-        var connectResultDelivered = false
+        // Callbacks arrive on binder threads and the main handler, so these must be atomic.
+        val connectResultDelivered = AtomicBoolean(false)
 
         safelyCloseGatt(gatt)
         gatt = null
 
         fun completeConnectOnce(ok: Boolean) {
-            if (!connectResultDelivered) {
-                connectResultDelivered = true
+            if (connectResultDelivered.compareAndSet(false, true)) {
                 onDone(ok)
             }
         }
@@ -306,10 +350,9 @@ class BleTransport<T : BleTarget>(
             // With sequentialSetup, GATT operations run strictly one after another
             // (MTU -> service discovery -> CCCD writes) to avoid a stuck
             // "device busy" state in Android's BluetoothGatt.
-            var discoveryStarted = false
+            val discoveryStarted = AtomicBoolean(false)
             fun startDiscovery(g: BluetoothGatt) {
-                if (discoveryStarted) return
-                discoveryStarted = true
+                if (!discoveryStarted.compareAndSet(false, true)) return
                 try {
                     g.discoverServices()
                 } catch (_: Exception) {
@@ -357,7 +400,7 @@ class BleTransport<T : BleTarget>(
                         resetFlow()
 
                         if (
-                            !connectResultDelivered &&
+                            !connectResultDelivered.get() &&
                             status == 133 &&
                             attempt < MAX_CONNECT_ATTEMPTS
                         ) {
@@ -376,7 +419,7 @@ class BleTransport<T : BleTarget>(
                             return
                         }
 
-                        state = State.DISCONNECTED
+                        _state.value = State.DISCONNECTED
                         writeChar = null
                         lastError = if (status != BluetoothGatt.GATT_SUCCESS) {
                             "GATT disconnected (status=$status). " +
@@ -406,30 +449,37 @@ class BleTransport<T : BleTarget>(
 
                 override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
                     Log.d(TAG, "Services discovered: status=$status")
-                    val service: BluetoothGattService? = g.getService(spec.service)
-                    writeChar = service?.getCharacteristic(spec.write)
-                    state = if (writeChar != null) State.READY else State.DISCONNECTED
+                    val service = g.getService(spec.service)
+                    val ch = service?.getCharacteristic(spec.write)
+                    writeChar = ch
 
-                    if (writeChar == null) {
+                    if (ch == null) {
+                        _state.value = State.DISCONNECTED
                         lastError = "Printer write characteristic not found"
                         Log.w(TAG, lastError ?: "Printer write characteristic not found")
                         completeConnectOnce(false)
                         return
                     }
 
+                    // Only CONNECTING -> READY: if disconnect() ran in the meantime, keep that.
+                    if (!_state.compareAndSet(State.CONNECTING, State.READY)) {
+                        Log.w(TAG, "Connection was cancelled while discovering services")
+                        completeConnectOnce(false)
+                        return
+                    }
+
                     lastError = null
-                    val writeProperties = writeChar?.properties ?: 0
                     Log.i(
                         TAG,
                         "Write characteristic ${spec.write} " +
-                                "properties=0x${writeProperties.toString(16)}",
+                                "properties=0x${ch.properties.toString(16)}",
                     )
                     Log.i(TAG, "Printer is ready: ${resolved.name}")
 
                     // Subscribe to whatever the flow control strategy needs, one CCCD
                     // write at a time, and report "connected" after the last one.
                     val wanted = flow.notifyUuids
-                    val toSubscribe = wanted.mapNotNull { service?.getCharacteristic(it) }
+                    val toSubscribe = wanted.mapNotNull { service.getCharacteristic(it) }
                     if (toSubscribe.size < wanted.size) {
                         Log.w(TAG, "Some flow-control characteristics are missing; pacing may be timed")
                     }
@@ -438,15 +488,18 @@ class BleTransport<T : BleTarget>(
                         return
                     }
 
-                    notifyQueue.clear()
-                    toSubscribe.forEach { notifyQueue.addLast(it) }
-                    Log.i(TAG, "Subscribing to ${notifyQueue.size} notify characteristics")
+                    synchronized(notifyLock) {
+                        notifyQueue.clear()
+                        toSubscribe.forEach { notifyQueue.addLast(it) }
+                        onNotifySetupDone = { completeConnectOnce(true) }
+                    }
+                    Log.i(TAG, "Subscribing to ${toSubscribe.size} notify characteristics")
 
-                    onNotifySetupDone = { completeConnectOnce(true) }
                     mainHandler.postDelayed(
                         {
-                            val pending = onNotifySetupDone
-                            onNotifySetupDone = null
+                            val pending = synchronized(notifyLock) {
+                                onNotifySetupDone.also { onNotifySetupDone = null }
+                            }
                             if (pending != null) {
                                 Log.w(TAG, "Notify setup timed out; continuing anyway")
                                 pending()
@@ -532,9 +585,9 @@ class BleTransport<T : BleTarget>(
         val g = gatt ?: return false
         val ch = writeChar ?: return false
         val spec = gattSpec ?: return false
-        if (state != State.READY) return false
 
-        state = State.PRINTING
+        // Atomic READY -> PRINTING: a second concurrent job is rejected here.
+        if (!transition(setOf(State.READY), State.PRINTING)) return false
         val flow = this.flow
 
         try {
@@ -557,7 +610,7 @@ class BleTransport<T : BleTarget>(
             val sendStart = SystemClock.elapsedRealtime()
 
             for ((i, chunk) in chunks.withIndex()) {
-                if (state == State.DISCONNECTED) {
+                if (_state.value == State.DISCONNECTED) {
                     lastError =
                         lastError
                             ?: "Disconnected during BLE transfer (status=$lastGattStatus)"
@@ -580,7 +633,7 @@ class BleTransport<T : BleTarget>(
                         "BLE write failed at chunk ${i + 1}/${chunks.size} " +
                                 "(code=$code, status=$lastGattStatus)"
                     Log.w(TAG, lastError ?: "BLE write failed")
-                    state = State.DISCONNECTED
+                    _state.value = State.DISCONNECTED
                     return false
                 }
 
@@ -597,14 +650,19 @@ class BleTransport<T : BleTarget>(
                 is JobOutcome.Fault -> {
                     lastError = outcome.message
                     Log.w(TAG, outcome.message)
-                    state = State.READY
+                    _state.compareAndSet(State.PRINTING, State.READY)
                     return false
                 }
 
                 JobOutcome.Done -> Unit
             }
 
-            state = State.READY
+            // Only PRINTING -> READY: a disconnect that happened while waiting must not be undone.
+            if (!_state.compareAndSet(State.PRINTING, State.READY)) {
+                lastError = lastError ?: "Connection lost before the printer confirmed the job"
+                Log.w(TAG, lastError ?: "Connection lost")
+                return false
+            }
             lastError = null
             return true
         } catch (e: Exception) {
@@ -612,7 +670,7 @@ class BleTransport<T : BleTarget>(
                 "BLE write threw ${e.javaClass.simpleName}" +
                         (e.message?.let { ": $it" } ?: "")
             Log.e(TAG, lastError ?: "BLE write exception", e)
-            state = State.DISCONNECTED
+            _state.value = State.DISCONNECTED
             return false
         }
     }
@@ -638,28 +696,36 @@ class BleTransport<T : BleTarget>(
         writeChar = null
         resetFlow()
         negotiatedMtu = 23
-        state = State.DISCONNECTED
+        _state.value = State.DISCONNECTED
     }
 
     private fun resetFlow() {
-        notifyQueue.clear()
-        onNotifySetupDone = null
+        synchronized(notifyLock) {
+            notifyQueue.clear()
+            onNotifySetupDone = null
+        }
         flow.reset()
     }
 
+    private fun takeNextNotify(): Pair<BluetoothGattCharacteristic?, (() -> Unit)?> =
+        synchronized(notifyLock) {
+            val ch = notifyQueue.removeFirstOrNull()
+            val done = if (ch == null) onNotifySetupDone else null
+            if (ch == null) onNotifySetupDone = null
+            ch to done
+        }
+
     private fun enableNextNotify(g: BluetoothGatt) {
         while (true) {
-            val ch = notifyQueue.removeFirstOrNull()
+            val (ch, done) = takeNextNotify()
             if (ch == null) {
-                val done = onNotifySetupDone
-                onNotifySetupDone = null
                 done?.invoke()
                 return
             }
             try {
                 if (enableNotify(g, ch)) return // wait for onDescriptorWrite
                 Log.w(TAG, "Could not subscribe to ${ch.uuid}; skipping")
-            } catch(_: SecurityException){
+            } catch (_: SecurityException) {
                 Log.w(TAG, "No Bluetooth permissions given")
             }
         }

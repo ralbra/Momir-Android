@@ -13,6 +13,8 @@ object CardRenderer {
     private const val PADDING = 12f
     private const val NAME_MANA_GAP = 12f
     private const val MIN_WRAP_WIDTH = 60f
+    private const val MIN_NAME_SHARE = 0.4f
+    private const val COMPACT_MANA = false
 
     fun renderCardBitmap(creature: Creature, artBitmap: Bitmap?, printWidth: Int = 576): Bitmap {
         val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -43,17 +45,22 @@ object CardRenderer {
         val typeLineHeight = 30f
         val ptHeight = if (creature.power.isNotBlank() && creature.toughness.isNotBlank()) 42f else 0f
 
-        // The mana cost stays right-aligned on the first name line, so the name
-        // only gets the width that is left over.
-        val manaWidth =
-            if (creature.manaCost.isNotBlank()) namePaint.measureText(creature.manaCost) else 0f
-        val nameMaxWidth =
-            (if (manaWidth > 0f) contentWidth - manaWidth - NAME_MANA_GAP else contentWidth)
-                .coerceAtLeast(MIN_WRAP_WIDTH)
+        val manaText = if (COMPACT_MANA) compactMana(creature.manaCost) else creature.manaCost
+        val manaWidth = if (manaText.isNotBlank()) namePaint.measureText(manaText) else 0f
 
-        val nameLines = wrapLines(creature.name, namePaint, nameMaxWidth).ifEmpty { listOf("") }
+        // Name beside the cost, or the cost on its own row when the name would be squeezed.
+        val besideWidth =
+            (contentWidth - manaWidth - NAME_MANA_GAP).coerceAtLeast(MIN_WRAP_WIDTH)
+        val fullLines = wrapLines(creature.name, namePaint, contentWidth)
+        val besideLines = wrapLines(creature.name, namePaint, besideWidth)
+        val manaOwnLine =
+            manaWidth > 0f &&
+                    (besideLines.size > fullLines.size || besideWidth < contentWidth * MIN_NAME_SHARE)
+
+        val nameLines = (if (manaOwnLine) fullLines else besideLines).ifEmpty { listOf("") }
         val typeLines = wrapLines(creature.type, typePaint, contentWidth).ifEmpty { listOf("") }
-        val extraNameHeight = (nameLines.size - 1) * nameLineHeight
+        val extraNameHeight =
+            (nameLines.size - 1) * nameLineHeight + (if (manaOwnLine) nameLineHeight else 0f)
         val extraTypeHeight = (typeLines.size - 1) * typeLineHeight
 
         val art = artBitmap?.let {
@@ -79,7 +86,9 @@ object CardRenderer {
             canvas.drawText(line, PADDING, y + i * nameLineHeight, namePaint)
         }
         if (manaWidth > 0f) {
-            canvas.drawText(creature.manaCost, printWidth - PADDING - manaWidth, y, namePaint)
+            val manaY = if (manaOwnLine) y + nameLines.size * nameLineHeight else y
+            val manaX = maxOf(PADDING, printWidth - PADDING - manaWidth)
+            canvas.drawText(manaText, manaX, manaY, namePaint)
         }
         y += extraNameHeight + 8f
         canvas.drawLine(PADDING, y, printWidth - PADDING, y, rulePaint)
@@ -117,6 +126,13 @@ object CardRenderer {
 
         return out
     }
+
+    /** "{2}{W}{W/U}" -> "2W(W/U)": shorter, so more room is left for the card name. */
+    private fun compactMana(cost: String): String =
+        Regex("\\{([^}]*)}").replace(cost) { m ->
+            val symbol = m.groupValues[1]
+            if ('/' in symbol) "($symbol)" else symbol
+        }
 
     private fun wrapLines(text: String, paint: Paint, maxWidth: Float): List<String> {
         if (text.isBlank()) return emptyList()
