@@ -18,6 +18,10 @@ private const val TAG = "MomirFlow"
  * when the printer needs attention (cover open / no paper).
  *
  * Pacing between chunks is inherited from [TimedPacing].
+ * *
+ * Pause/resume packet values are taken from TiMini-Print
+ * (https://github.com/Dejniel/TiMini-Print, timiniprint/protocol/families/tiny/core.py),
+ * Copyright 2026 Daniel Banecki, licensed under the Apache License, Version 2.0.
  */
 class TinyFlow(
     private val notify: List<UUID>,

@@ -153,6 +153,98 @@ If you are a developer, the following information is extremely helpful:
 
 ---
 
+# Reference: Tiny Print X6H
+
+This is what we found out about the X6H while adding support for it. It shows what the
+"Developer Information" above looks like for a finished driver.
+
+## Device
+
+- Advertises as `X6h-XXXX` (for example `X6h-E16D`).
+- Dual-mode: it offers classic Bluetooth (SPP and other profiles) as well as BLE. The app uses BLE.
+- Protocol: the "tiny" family from [TiMini-Print](https://github.com/Dejniel/TiMini-Print)
+  (profile `x6h`): 384 dots print width, 200 dpi, one bit per pixel, RLE-compressed rows.
+
+## BLE services
+
+Found with a `bleak` scan on Linux (see the workaround below).
+
+| Service | Characteristic | Properties | Used by the app |
+| --- | --- | --- | --- |
+| `AE30` | `AE01` | write without response | **Yes, print data** |
+| `AE30` | `AE02` | notify | **Yes, flow control and status replies** |
+| `AE30` | `AE03` | write without response | No |
+| `AE30` | `AE04` | notify | Subscribed, never sent anything in our tests |
+| `AE30` | `AE05` | indicate | Subscribed, never sent anything in our tests |
+| `AE30` | `AE10` | read, write | No |
+| `AE3A` | `AE3B` | write without response | No |
+| `AE3A` | `AE3C` | notify | No |
+
+All UUIDs have the standard form `0000XXXX-0000-1000-8000-00805f9b34fb`. The printer's UUID list
+also contains `AF30` (visible in BlueZ output), but no GATT service with that UUID exists.
+
+Settings that work: MTU request 512 (512 was negotiated), writes without response, 180-byte chunks.
+
+**Connection order matters.** Request the MTU, wait for it, discover services, wait, and only
+then write the notification descriptors one after another. When these steps overlapped, a
+descriptor write never completed and the first data write failed with a busy GATT stack.
+
+## Packet format
+
+Every command is framed as:
+51 78 | cmd | 00 | length (2 bytes, little-endian) | payload | crc8(payload) | FF
+
+
+The CRC is CRC-8 with polynomial `0x07` and initial value 0. The job the app sends:
+
+| Command | Meaning |
+| --- | --- |
+| `A4` | Darkness (blackening): payload `0x30 + level`, level 1-5 |
+| `AF` | Energy: 9500 as 2 bytes little-endian |
+| `BE` | Image mode: `00` |
+| `BD` | Feed speed 10, repeated after every 200 rows |
+| `BF` / `A2` | One row each: `BF` is the RLE row, `A2` the raw row (LSB-first), used when RLE is not smaller |
+| `BD` | Feed padding 12 |
+| `A1` | Paper feed, payload `30 00`, sent twice |
+| `BD` | Feed padding 12 again |
+| `A3` | State query, always the last packet |
+
+## Flow control and completion
+
+The printer sends its notifications on `AE02`:
+
+- **Pause:** `51 78 AE 01 01 00 10 70 FF`. The app stops sending (it waits up to 5 s).
+- **Resume:** `51 78 AE 01 01 00 00 00 FF`. The app continues.
+- **Job finished:** the answer to the final `A3` query, `51 78 A3 01 03 00 <3 payload bytes> <crc> FF`.
+  It arrives only after the printer has worked through the whole job (about 14-17 s for a card).
+
+Observed `A3` payloads:
+
+| Payload | Seen when | Reply time after the last data write |
+| --- | --- | --- |
+| `00 15 28` | Normal print | about 14-17 s |
+| `01 1b 28` | Printer not ready (the print did not happen) | about 2 s |
+
+The first payload byte is non-zero when the printer needs attention, and the app reports that as
+"check paper / cover". What the other bytes and the individual bits mean is not known yet.
+
+## Troubleshooting on Linux (bleak / BlueZ)
+
+Because the X6H is dual-mode, BlueZ may connect over classic Bluetooth instead of BLE. Symptoms:
+
+- `bluetoothctl connect` fails with `org.bluez.Error.Failed br-connection-refused`, and
+- `bleak` raises `failed to discover services, device disconnected`.
+
+Fix: force BlueZ to LE only.
+
+1. Remove the old pairing: `bluetoothctl remove <address>`
+2. In `/etc/bluetooth/main.conf`, under `[General]`, set `ControllerMode = le`
+3. Restart the service: `sudo systemctl restart bluetooth`
+4. Scan and connect again; the GATT services above should now be listed.
+
+`ControllerMode = le` disables classic Bluetooth for **all** devices on that computer, so set it
+back when you are done.
+
 # Privacy
 
 The Bluetooth HCI log only contains Bluetooth traffic between your phone and nearby devices. While it normally does not contain personal information, please review it before sharing if you have privacy concerns.

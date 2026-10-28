@@ -1,3 +1,22 @@
+/*
+ * Encoder for the "tiny" protocol family, used by the Tiny Print X6H thermal printer.
+ *
+ * This file is a Kotlin port, with modifications, of parts of TiMini-Print
+ * (https://github.com/Dejniel/TiMini-Print), Copyright 2026 Daniel Banecki,
+ * licensed under the Apache License, Version 2.0
+ * (https://www.apache.org/licenses/LICENSE-2.0).
+ *
+ * Derived from timiniprint/protocol/:
+ *  - packet.py              packet framing and CRC-8
+ *  - encoding.py            row packing (pack_line) and RLE rows (rle_encode_line, build_line_packets)
+ *  - _prefixed_commands.py  blackening, energy, print-mode, feed, paper and state commands
+ *  - _builders.py           overall job layout (the generic fallback used by the "x6h" profile)
+ *
+ * Changes: translated from Python to Kotlin, works on an Android Bitmap, and builds the whole
+ * job in one function; the X6H parameters (energy, speed, feed padding, bit order) are passed
+ * in by TinyDriver.
+ */
+
 package com.momir.android.printer.tiny
 
 import android.graphics.Bitmap
@@ -64,7 +83,10 @@ object TinyEncoder {
         return out
     }
 
-    /** [bw] must already be monochrome (pure black/white), e.g. from ThermalRenderer.bitmapToMonochrome(). */
+    /**
+     * [bw] must already be monochrome (pure black/white), e.g. from
+     * [com.momir.android.render.Monochrome.toMonochrome].
+     */
     fun build(
         bw: Bitmap,
         blackening: Int = 3,
