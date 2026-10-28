@@ -80,6 +80,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // Mirror the transport state into the UI from the start, independent of bootstrap.
+        viewModelScope.launch {
+            ble.stateFlow.collect { s ->
+                _ui.update { it.copy(printerState = s) }
+            }
+        }
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val total = repo.ensureLoaded { stage ->
@@ -96,11 +103,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     message = "Ready",
                     totalCreatures = total,
                 )
-                viewModelScope.launch {
-                    ble.stateFlow.collect { s ->
-                        _ui.update { it.copy(printerState = s) }
-                    }
-                }
             } catch (e: Exception) {
                 _ui.value = _ui.value.copy(
                     loading = false,
@@ -202,7 +204,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             Manifest.permission.BLUETOOTH_SCAN,
             Manifest.permission.BLUETOOTH_CONNECT,
         ],
-    )private fun connectPrinter() {
+    )
+    private fun connectPrinter() {
         _ui.update { it.copy(message = "Scanning for printer...") }
 
         ble.connect { ok ->

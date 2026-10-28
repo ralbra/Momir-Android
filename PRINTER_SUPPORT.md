@@ -192,7 +192,7 @@ descriptor write never completed and the first data write failed with a busy GAT
 ## Packet format
 
 Every command is framed as:
-51 78 | cmd | 00 | length (2 bytes, little-endian) | payload | crc8(payload) | FF
+```51 78 | cmd | 00 | length (2 bytes, little-endian) | payload | crc8(payload) | FF```
 
 
 The CRC is CRC-8 with polynomial `0x07` and initial value 0. The job the app sends:
@@ -244,6 +244,8 @@ Fix: force BlueZ to LE only.
 
 `ControllerMode = le` disables classic Bluetooth for **all** devices on that computer, so set it
 back when you are done.
+
+---
 
 # Privacy
 
