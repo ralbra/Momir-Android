@@ -223,6 +223,20 @@ private fun MomirScreen(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = ui.previewMatchesPrinter,
+                            onCheckedChange = { vm.setPreviewMatchesPrinter(it) },
+                        )
+                        Text("Preview matches printer output")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "On: drawn and dithered like the printout. Off: classic 576 px grayscale preview.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = textMuted,
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = "Print darkness: ${ui.blackening} (1 = light, 5 = dark)",
                             modifier = Modifier.padding(top = 6.dp),
