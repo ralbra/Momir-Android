@@ -9,11 +9,23 @@ class SettingsStore(context: Context) {
         private const val PREFS_NAME = "momir_settings"
         private const val KEY_BLACKENING = "blackening"
         private const val KEY_PREVIEW_MATCHES_PRINTER = "preview_matches_printer"
+        private const val KEY_STARTING_LIFE = "starting_life"
+        private const val KEY_ROTATE_PLAYER_ONE = "rotate_player_one"
+        private const val KEY_BAR_HEIGHT_PERCENT = "bar_height_percent"
+        private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
 
         const val MIN_BLACKENING = 1
         const val MAX_BLACKENING = 5
         const val DEFAULT_BLACKENING = 3
         const val DEFAULT_PREVIEW_MATCHES_PRINTER = true
+
+        const val MIN_STARTING_LIFE = 1
+        const val MAX_STARTING_LIFE = 999
+        const val DEFAULT_STARTING_LIFE = 20
+
+        const val MIN_BAR_HEIGHT_PERCENT = 20
+        const val MAX_BAR_HEIGHT_PERCENT = 50
+        const val DEFAULT_BAR_HEIGHT_PERCENT = 33
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -37,4 +49,21 @@ class SettingsStore(context: Context) {
         set(value) {
             prefs.edit { putBoolean(KEY_PREVIEW_MATCHES_PRINTER, value) }
         }
-}
+
+    /** Life total both players start with after a reset. */
+    var startingLife: Int
+        get() = prefs.getInt(KEY_STARTING_LIFE, DEFAULT_STARTING_LIFE)
+            .coerceIn(MIN_STARTING_LIFE, MAX_STARTING_LIFE)
+        set(value) {
+            prefs.edit {
+                putInt(KEY_STARTING_LIFE, value.coerceIn(MIN_STARTING_LIFE, MAX_STARTING_LIFE))
+            }
+        }
+
+    /** Turn the top player's counter by 180 degrees. */
+    var rotatePlayerOne: Boolean
+        get() = prefs.getBoolean(KEY_ROTATE_PLAYER_ONE, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_ROTATE_PLAYER_ONE, value) }
+        }
+    }
