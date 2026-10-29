@@ -1,43 +1,37 @@
 package com.momir.android.ui
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Typeface
-import android.content.Context
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.momir.android.ble.BleTransport
+import com.momir.android.data.ArtRepository
 import com.momir.android.data.AtomicBootstrapper
 import com.momir.android.data.CardRepository
+import com.momir.android.data.SettingsStore
 import com.momir.android.model.Creature
 import com.momir.android.printer.PrintOptions
+import com.momir.android.printer.PrinterDriver
 import com.momir.android.printer.PrinterDrivers
 import com.momir.android.render.CardRenderer
-import com.momir.android.printer.PrinterDriver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
-import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
-import okhttp3.Request
 
-
-private const val PREFS_NAME = "momir_settings"
-private const val KEY_BLACKENING = "blackening"
-private const val DEFAULT_BLACKENING = 3
-class MainViewModel(app: Application) : AndroidViewModel(app) {
+// @JvmOverloads keeps a constructor that takes only the Application, which is what the
+// default ViewModel factory looks for; the other parameters can be replaced in tests.
+class MainViewModel @JvmOverloads constructor(
+    app: Application,
+    private val artRepository: ArtRepository = ArtRepository(app),
+    private val settings: SettingsStore = SettingsStore(app),
+) : AndroidViewModel(app) {
     enum class BootstrapMode {
         INITIAL,
         REFRESH,
@@ -59,19 +53,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val printerState: BleTransport.State = BleTransport.State.DISCONNECTED,
         val printerName: String? = null,
         val printWidth: Int = 576,
-        val blackening: Int = DEFAULT_BLACKENING,
+        val blackening: Int = SettingsStore.DEFAULT_BLACKENING,
     )
-    private val prefs = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-    private val _ui = MutableStateFlow(
-        UiState(
-            blackening = prefs.getInt(KEY_BLACKENING, DEFAULT_BLACKENING).coerceIn(1, 5),
-        ),
-    )
+
+    private val _ui = MutableStateFlow(UiState(blackening = settings.blackening))
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private val ble = BleTransport<PrinterDriver>(app.applicationContext, PrinterDrivers::forName)
     private val repo = CardRepository(AtomicBootstrapper(app.filesDir))
-    private val http = OkHttpClient()
 
     private val printInProgress = AtomicBoolean(false)
 
@@ -154,11 +143,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setIncludeFunny(v: Boolean) {
         _ui.value = _ui.value.copy(includeFunny = v)
     }
-    @SuppressLint("UseKtx")
+
     fun setBlackening(level: Int) {
-        val v = level.coerceIn(1, 5)
-        _ui.value = _ui.value.copy(blackening = v)
-        prefs.edit().putInt(KEY_BLACKENING, v).apply()
+        settings.blackening = level
+        _ui.update { it.copy(blackening = settings.blackening) }
     }
 
     fun setShowPreviewImage(v: Boolean) {
@@ -186,10 +174,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        val image = buildScryfallImageUrl(c.name, "normal")
         _ui.value = state.copy(
             card = c,
-            imageUrl = image,
+            imageUrl = artRepository.imageUrl(c.name),
             previewBitmap = null,
             message = "Rolled ${c.name}",
         )
@@ -229,6 +216,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
     }
+
     fun hasBluetoothPermissions(): Boolean = ble.hasBluetoothPermissions()
 
     /** The one action button: connects when disconnected, prints when ready. */
@@ -248,6 +236,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             say("Bluetooth permission missing")
         }
     }
+
     fun printCurrentCard() {
         val state = _ui.value
         val card = state.card ?: return
@@ -294,7 +283,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     } else {
                         CardRenderer.renderCardBitmap(
                             card,
-                            fetchArtCrop(card.name),
+                            artRepository.fetchArtCrop(card.name),
                             printWidth = driver.renderWidth,
                         )
                     }
@@ -325,131 +314,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-    private fun fetchArtCrop(name: String): Bitmap? {
-        val network = try {
-            val req = Request.Builder()
-                .url(buildScryfallImageUrl(name, "art_crop"))
-                .header("User-Agent", "momir-android/1.0")
-                .header("Accept", "image/*")
-                .build()
-
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val bytes = resp.body.bytes()
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            }
-        } catch (_: Exception) {
-            null
-        }
-
-        return network ?: loadBundledDummyArt() ?: createGeneratedDummyArt(name)
-    }
-
-    @SuppressLint("DiscouragedApi")
-    private fun loadBundledDummyArt(): Bitmap? {
-        val app = getApplication<Application>()
-
-        try {
-            app.assets.open("dummy.png").use { input ->
-                return BitmapFactory.decodeStream(input)
-            }
-        } catch (_: Exception) {
-        }
-
-        return try {
-            val resId = app.resources.getIdentifier(
-                "dummy",
-                "drawable",
-                app.packageName,
-            )
-            if (resId != 0) {
-                BitmapFactory.decodeResource(app.resources, resId)
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    @SuppressLint("UseKtx")
-    private fun createGeneratedDummyArt(name: String): Bitmap {
-        val width = 1024
-        val height = 1024
-        val bmp = Bitmap.createBitmap(
-            width,
-            height,
-            Bitmap.Config.ARGB_8888,
-        )
-        val canvas = Canvas(bmp)
-
-        canvas.drawColor(Color.rgb(242, 244, 248))
-
-        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(45, 55, 72)
-            style = Paint.Style.STROKE
-            strokeWidth = 10f
-        }
-        canvas.drawRect(
-            24f,
-            24f,
-            (width - 24).toFloat(),
-            (height - 24).toFloat(),
-            border,
-        )
-
-        val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(45, 55, 72)
-            textSize = 52f
-            typeface = Typeface.DEFAULT_BOLD
-            textAlign = Paint.Align.CENTER
-        }
-
-        val subtitle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(99, 115, 129)
-            textSize = 36f
-            textAlign = Paint.Align.CENTER
-        }
-
-        val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(75, 85, 99)
-            textSize = 260f
-            typeface = Typeface.DEFAULT_BOLD
-            textAlign = Paint.Align.CENTER
-        }
-
-        canvas.drawText("NO ART AVAILABLE", width / 2f, 150f, title)
-        canvas.drawText("offline fallback", width / 2f, 210f, subtitle)
-        canvas.drawText("?", width / 2f, 590f, mark)
-
-        val maxName =
-            if (name.length > 40) {
-                name.take(37) + "..."
-            } else {
-                name
-            }
-
-        canvas.drawText(maxName, width / 2f, 910f, subtitle)
-        return bmp
-    }
 
     private fun generatePreview(card: Creature) {
         viewModelScope.launch(Dispatchers.IO) {
-            val art = fetchArtCrop(card.name)
+            val art = artRepository.fetchArtCrop(card.name)
             val preview = CardRenderer.renderCardBitmap(card, art, printWidth = 576)
             _ui.value = _ui.value.copy(previewBitmap = preview)
         }
-    }
-
-    private fun buildScryfallImageUrl(name: String, version: String): String {
-        return "https://api.scryfall.com/cards/named"
-            .toHttpUrl()
-            .newBuilder()
-            .addQueryParameter("exact", name)
-            .addQueryParameter("format", "image")
-            .addQueryParameter("version", version)
-            .build()
-            .toString()
     }
 
     private fun stageMessage(stage: AtomicBootstrapper.Stage): String {
