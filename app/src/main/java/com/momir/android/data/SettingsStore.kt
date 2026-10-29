@@ -66,4 +66,24 @@ class SettingsStore(context: Context) {
         set(value) {
             prefs.edit { putBoolean(KEY_ROTATE_PLAYER_ONE, value) }
         }
-    }
+
+    /** Height of the middle control bar in percent of the screen. */
+    var barHeightPercent: Int
+        get() = prefs.getInt(KEY_BAR_HEIGHT_PERCENT, DEFAULT_BAR_HEIGHT_PERCENT)
+            .coerceIn(MIN_BAR_HEIGHT_PERCENT, MAX_BAR_HEIGHT_PERCENT)
+        set(value) {
+            prefs.edit {
+                putInt(
+                    KEY_BAR_HEIGHT_PERCENT,
+                    value.coerceIn(MIN_BAR_HEIGHT_PERCENT, MAX_BAR_HEIGHT_PERCENT),
+                )
+            }
+        }
+
+    /** Keep the screen on while the app is open. */
+    var keepScreenOn: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
+        set(value) {
+            prefs.edit { putBoolean(KEY_KEEP_SCREEN_ON, value) }
+        }
+}

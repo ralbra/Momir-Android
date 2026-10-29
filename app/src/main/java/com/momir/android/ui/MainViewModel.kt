@@ -29,6 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Width of the grayscale preview shown while no printer is connected (or in classic mode). */
 private const val FALLBACK_PREVIEW_WIDTH = 576
 
+private const val MAX_MANA_VALUE = 16
+
 // @JvmOverloads keeps a constructor that takes only the Application, which is what the
 // default ViewModel factory looks for; the other parameters can be replaced in tests.
 class MainViewModel @JvmOverloads constructor(
@@ -59,6 +61,14 @@ class MainViewModel @JvmOverloads constructor(
         val printWidth: Int = 576,
         val blackening: Int = SettingsStore.DEFAULT_BLACKENING,
         val previewMatchesPrinter: Boolean = SettingsStore.DEFAULT_PREVIEW_MATCHES_PRINTER,
+        // Life counter and layout
+        val life1: Int = SettingsStore.DEFAULT_STARTING_LIFE,
+        val life2: Int = SettingsStore.DEFAULT_STARTING_LIFE,
+        val startingLife: Int = SettingsStore.DEFAULT_STARTING_LIFE,
+        val rotatePlayerOne: Boolean = true,
+        val barHeightPercent: Int = SettingsStore.DEFAULT_BAR_HEIGHT_PERCENT,
+        val keepScreenOn: Boolean = true,
+        val showRollDialog: Boolean = false,
     )
 
     /** A rendered card, tagged with what it was rendered for. [driverName] is null for the fallback. */
@@ -72,6 +82,12 @@ class MainViewModel @JvmOverloads constructor(
         UiState(
             blackening = settings.blackening,
             previewMatchesPrinter = settings.previewMatchesPrinter,
+            life1 = settings.startingLife,
+            life2 = settings.startingLife,
+            startingLife = settings.startingLife,
+            rotatePlayerOne = settings.rotatePlayerOne,
+            barHeightPercent = settings.barHeightPercent,
+            keepScreenOn = settings.keepScreenOn,
         ),
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -115,7 +131,7 @@ class MainViewModel @JvmOverloads constructor(
                 _ui.value = _ui.value.copy(
                     loading = false,
                     bootstrapping = false,
-                    message = "Ready",
+                    message = "",
                     totalCreatures = total,
                 )
             } catch (e: Exception) {
@@ -162,8 +178,48 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun setMv(mv: Int) {
-        _ui.value = _ui.value.copy(selectedMv = mv)
+    // ---- Life counter -------------------------------------------------------------
+
+    fun changeLife(player: Int, delta: Int) {
+        _ui.update {
+            if (player == 1) {
+                it.copy(life1 = it.life1 + delta)
+            } else {
+                it.copy(life2 = it.life2 + delta)
+            }
+        }
+    }
+
+    fun resetLife() {
+        _ui.update { it.copy(life1 = it.startingLife, life2 = it.startingLife) }
+    }
+
+    fun setStartingLife(v: Int) {
+        settings.startingLife = v
+        _ui.update { it.copy(startingLife = settings.startingLife) }
+    }
+
+    // ---- Layout and screen settings -----------------------------------------------
+
+    fun setRotatePlayerOne(v: Boolean) {
+        settings.rotatePlayerOne = v
+        _ui.update { it.copy(rotatePlayerOne = v) }
+    }
+
+    fun setBarHeightPercent(v: Int) {
+        settings.barHeightPercent = v
+        _ui.update { it.copy(barHeightPercent = settings.barHeightPercent) }
+    }
+
+    fun setKeepScreenOn(v: Boolean) {
+        settings.keepScreenOn = v
+        _ui.update { it.copy(keepScreenOn = v) }
+    }
+
+    // ---- Rolling ------------------------------------------------------------------
+
+    fun changeMv(delta: Int) {
+        _ui.update { it.copy(selectedMv = (it.selectedMv + delta).coerceIn(0, MAX_MANA_VALUE)) }
     }
 
     fun setIncludeFunny(v: Boolean) {
@@ -198,26 +254,38 @@ class MainViewModel @JvmOverloads constructor(
         val c = repo.getRandomCreature(state.selectedMv, state.includeFunny)
 
         if (c == null) {
-            _ui.value = state.copy(
-                card = null,
-                imageUrl = null,
-                previewBitmap = null,
-                message = "No creatures at MV ${state.selectedMv}",
-            )
+            _ui.update {
+                it.copy(
+                    card = null,
+                    imageUrl = null,
+                    previewBitmap = null,
+                    showRollDialog = true,
+                    message = "No creatures at MV ${it.selectedMv}",
+                )
+            }
             return
         }
 
-        _ui.value = state.copy(
-            card = c,
-            imageUrl = artRepository.imageUrl(c.name),
-            previewBitmap = null,
-            message = "Rolled ${c.name}",
-        )
+        _ui.update {
+            it.copy(
+                card = c,
+                imageUrl = artRepository.imageUrl(c.name),
+                previewBitmap = null,
+                showRollDialog = true,
+                message = "Rolled ${c.name}",
+            )
+        }
 
         if (state.showPreviewImage) {
             generatePreview(c)
         }
     }
+
+    fun dismissRollDialog() {
+        _ui.update { it.copy(showRollDialog = false) }
+    }
+
+    // ---- Printer ------------------------------------------------------------------
 
     @RequiresPermission(
         allOf = [
@@ -252,7 +320,20 @@ class MainViewModel @JvmOverloads constructor(
 
     fun hasBluetoothPermissions(): Boolean = ble.hasBluetoothPermissions()
 
-    /** The one action button: connects when disconnected, prints when ready. */
+    /** Tapping the printer icon while it is not disconnected: say what the state is. */
+    fun showPrinterInfo() {
+        val name = ble.deviceName ?: "Printer"
+        say(
+            when (ble.state) {
+                BleTransport.State.DISCONNECTED -> "Printer not connected"
+                BleTransport.State.CONNECTING -> "Connecting to printer..."
+                BleTransport.State.READY -> "Connected to $name"
+                BleTransport.State.PRINTING -> "Printing on $name"
+            },
+        )
+    }
+
+    /** The popup's action button: connects when disconnected, prints when ready. */
     fun onPrimaryAction() {
         when (ble.state) {
             BleTransport.State.DISCONNECTED -> connectSafely()
@@ -345,6 +426,8 @@ class MainViewModel @JvmOverloads constructor(
             }
         }
     }
+
+    // ---- Rendering ----------------------------------------------------------------
 
     /** The driver whose geometry the preview should use, or null while no printer is connected. */
     private fun activeDriver(): PrinterDriver? =
