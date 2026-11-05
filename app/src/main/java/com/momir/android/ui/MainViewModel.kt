@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Width of the grayscale preview shown while no printer is connected (or in classic mode). */
@@ -93,7 +94,18 @@ class MainViewModel @JvmOverloads constructor(
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private val ble = BleTransport<PrinterDriver>(app.applicationContext, PrinterDrivers::forName)
-    private val repo = CardRepository(AtomicBootstrapper(app.filesDir))
+    private val repo = CardRepository(
+        AtomicBootstrapper(
+            app.filesDir,
+            seed = {
+                try {
+                    app.assets.open("creatures_min.json")
+                } catch (_: IOException) {
+                    null
+                }
+            },
+        ),
+    )
 
     private val printInProgress = AtomicBoolean(false)
 

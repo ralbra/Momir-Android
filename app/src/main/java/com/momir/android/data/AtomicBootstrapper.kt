@@ -10,9 +10,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
-class AtomicBootstrapper(private val appDir: File) {
+class AtomicBootstrapper(
+    private val appDir: File,
+    private val seed: () -> InputStream? = { null },
+) {
     enum class Stage {
         DOWNLOADING,
         PROCESSING,
@@ -35,7 +39,7 @@ class AtomicBootstrapper(private val appDir: File) {
 
     fun loadOrBootstrap(onStage: (Stage) -> Unit = {}): Map<Int, List<Creature>> {
         val processed = File(appDir, PROCESSED_FILE)
-        if (!processed.exists()) {
+        if (!processed.exists() && !seedProcessed(processed)) {
             val raw = File(appDir, RAW_FILE)
             if (!raw.exists()) {
                 onStage(Stage.DOWNLOADING)
@@ -58,6 +62,23 @@ class AtomicBootstrapper(private val appDir: File) {
         processAtomic(raw, processed)
         onStage(Stage.LOADING)
         return loadProcessed(processed)
+    }
+
+    /** Copies the database bundled in assets, if there is one. */
+    private fun seedProcessed(target: File): Boolean {
+        val input = seed() ?: return false
+        return try {
+            target.parentFile?.mkdirs()
+            val tmp = File(target.parentFile, "${target.name}.tmp")
+            input.use { i -> tmp.outputStream().use { o -> i.copyTo(o) } }
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun downloadAtomic(target: File) {
