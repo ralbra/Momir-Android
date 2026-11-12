@@ -249,6 +249,9 @@ private fun PlayerRow(
     onDelta: (player: Int, delta: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Counters that share a row are narrow, so their plus/minus areas are stacked.
+    val stacked = players.size > 1
+
     Row(modifier = modifier) {
         players.forEach { index ->
             LifeCounter(
@@ -258,6 +261,7 @@ private fun PlayerRow(
                 background = colors[index % colors.size],
                 contentColor = contentColor,
                 rotated = rotated,
+                stackedControls = stacked,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
