@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -23,27 +25,32 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.momir.android.ble.BleTransport
+import com.momir.android.model.Creature
 import kotlin.math.roundToInt
 
 private enum class SettingsSection(val title: String) {
     GAME("Game"),
     PRINTER("Printer"),
     UI("UI"),
+    DEBUG("Debug"),
 }
 
 /** Full-screen settings with accordion sections; one section is open at a time. */
@@ -54,7 +61,12 @@ fun SettingsDialog(
     onClose: () -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(SettingsSection.GAME) }
-    val sections = listOf(SettingsSection.GAME, SettingsSection.PRINTER, SettingsSection.UI)
+    val sections = listOf(
+        SettingsSection.GAME,
+        SettingsSection.PRINTER,
+        SettingsSection.UI,
+        SettingsSection.DEBUG,
+    )
 
     Dialog(
         onDismissRequest = onClose,
@@ -92,6 +104,7 @@ fun SettingsDialog(
                                 SettingsSection.GAME -> GameSettings(ui, vm, onClose)
                                 SettingsSection.PRINTER -> PrinterSettings(ui, vm)
                                 SettingsSection.UI -> UiSettings(ui, vm)
+                                SettingsSection.DEBUG -> DebugSettings(ui, vm, onClose)
                             }
                         }
                     }
@@ -245,6 +258,65 @@ private fun UiSettings(
         valueRange = 20f..50f,
         steps = 29,
     )
+}
+
+@Composable
+private fun DebugSettings(
+    ui: MainViewModel.UiState,
+    vm: MainViewModel,
+    onClose: () -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val matches = remember(query, ui.totalCreatures) { vm.searchCards(query) }
+
+    fun show(card: Creature) {
+        vm.rollCard(card)
+        onClose()
+    }
+
+    Text("Roll a specific card", fontWeight = FontWeight.Bold)
+    Text(
+        "Type part of a card name (at least two letters) and pick a result. The card opens in the roll popup like a normal roll, with Print.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    OutlinedTextField(
+        value = query,
+        onValueChange = { query = it },
+        label = { Text("Card name") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { matches.firstOrNull()?.let { show(it) } }),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    when {
+        query.trim().length < 2 -> Unit
+
+        matches.isEmpty() ->
+            Text(
+                "No creature with that name in the card list.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+        else -> matches.forEach { card ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { show(card) }
+                    .padding(vertical = 6.dp),
+            ) {
+                Text(card.name, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "MV ${card.manaValue}, ${card.type}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 @Composable

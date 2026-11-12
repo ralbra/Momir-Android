@@ -369,18 +369,32 @@ class MainViewModel @JvmOverloads constructor(
             return
         }
 
+        presentCard(c, "Rolled ${c.name}")
+    }
+
+    /** Debug: cards whose name matches [query], best matches first. */
+    fun searchCards(query: String): List<Creature> = repo.searchByName(query)
+
+    /** Debug: shows a chosen card in the roll popup, as if it had been rolled. */
+    fun rollCard(card: Creature) {
+        presentCard(card, "Showing ${card.name}")
+    }
+
+    private fun presentCard(card: Creature, message: String) {
+        val showPreview = _ui.value.showPreviewImage
+
         _ui.update {
             it.copy(
-                card = c,
-                imageUrl = artRepository.imageUrl(c.name),
+                card = card,
+                imageUrl = artRepository.imageUrl(card.name),
                 previewBitmap = null,
                 showRollDialog = true,
-                message = "Rolled ${c.name}",
+                message = message,
             )
         }
 
-        if (state.showPreviewImage) {
-            generatePreview(c)
+        if (showPreview) {
+            generatePreview(card)
         }
     }
 
