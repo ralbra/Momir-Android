@@ -70,6 +70,7 @@ class MainViewModel @JvmOverloads constructor(
         val barHeightPercent: Int = SettingsStore.DEFAULT_BAR_HEIGHT_PERCENT,
         val keepScreenOn: Boolean = true,
         val showRollDialog: Boolean = false,
+        val cacheArt: Boolean = SettingsStore.DEFAULT_CACHE_ART,
     )
 
     /** A rendered card, tagged with what it was rendered for. [driverName] is null for the fallback. */
@@ -89,6 +90,7 @@ class MainViewModel @JvmOverloads constructor(
             rotatePlayerOne = settings.rotatePlayerOne,
             barHeightPercent = settings.barHeightPercent,
             keepScreenOn = settings.keepScreenOn,
+            cacheArt = settings.cacheArt,
         ),
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -226,6 +228,11 @@ class MainViewModel @JvmOverloads constructor(
     fun setKeepScreenOn(v: Boolean) {
         settings.keepScreenOn = v
         _ui.update { it.copy(keepScreenOn = v) }
+    }
+
+    fun setCacheArt(v: Boolean) {
+        settings.cacheArt = v
+        _ui.update { it.copy(cacheArt = v) }
     }
 
     // ---- Rolling ------------------------------------------------------------------

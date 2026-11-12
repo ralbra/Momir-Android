@@ -176,6 +176,14 @@ private fun GameSettings(
     Button(onClick = vm::resetLife) { Text("Reset life totals") }
 
     SettingCheckbox("Include Un-sets", ui.includeFunny, vm::setIncludeFunny)
+
+    SettingCheckbox("Cache card art on this device", ui.cacheArt, vm::setCacheArt)
+    Text(
+        "Off by default. When on, card art is saved to and read from the app's internal storage, so cards keep their art offline. A fully filled cache uses a lot of storage.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
     OutlinedButton(
         onClick = {
             vm.refreshAtomicJson()

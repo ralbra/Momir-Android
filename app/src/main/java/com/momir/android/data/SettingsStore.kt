@@ -13,6 +13,7 @@ class SettingsStore(context: Context) {
         private const val KEY_ROTATE_PLAYER_ONE = "rotate_player_one"
         private const val KEY_BAR_HEIGHT_PERCENT = "bar_height_percent"
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+        private const val KEY_CACHE_ART = "cache_art"
 
         const val MIN_BLACKENING = 1
         const val MAX_BLACKENING = 5
@@ -26,6 +27,8 @@ class SettingsStore(context: Context) {
         const val MIN_BAR_HEIGHT_PERCENT = 20
         const val MAX_BAR_HEIGHT_PERCENT = 50
         const val DEFAULT_BAR_HEIGHT_PERCENT = 33
+
+        const val DEFAULT_CACHE_ART = false
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -85,5 +88,12 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, true)
         set(value) {
             prefs.edit { putBoolean(KEY_KEEP_SCREEN_ON, value) }
+        }
+
+    /** Save downloaded card art on the device and read it from there first. */
+    var cacheArt: Boolean
+        get() = prefs.getBoolean(KEY_CACHE_ART, DEFAULT_CACHE_ART)
+        set(value) {
+            prefs.edit { putBoolean(KEY_CACHE_ART, value) }
         }
 }
