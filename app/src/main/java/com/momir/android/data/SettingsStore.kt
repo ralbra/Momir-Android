@@ -17,6 +17,7 @@ class SettingsStore(context: Context) {
         private const val KEY_PLAYER_COUNT = "player_count"
         private const val KEY_MOMIR_FORMAT = "momir_format"
         private const val KEY_PLAY_WITHOUT_PRINTER = "play_without_printer"
+        private const val KEY_EMBLEM_TEXT = "emblem_text"
 
         const val MIN_BLACKENING = 1
         const val MAX_BLACKENING = 5
@@ -38,6 +39,11 @@ class SettingsStore(context: Context) {
         const val DEFAULT_PLAYER_COUNT = 2
         const val DEFAULT_MOMIR_FORMAT = "CLASSIC"
         const val DEFAULT_PLAY_WITHOUT_PRINTER = false
+
+        const val DEFAULT_EMBLEM_TEXT =
+            "{X}, Discard a card: Create a token that's a copy of a creature card with " +
+                "converted mana cost X chosen at random. Activate this ability only any time " +
+                "you could cast a sorcery and only once each turn."
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -126,5 +132,16 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_PLAY_WITHOUT_PRINTER, DEFAULT_PLAY_WITHOUT_PRINTER)
         set(value) {
             prefs.edit { putBoolean(KEY_PLAY_WITHOUT_PRINTER, value) }
+        }
+
+    /**
+     * Rules text printed on the Momir emblem. Meant to become editable; an empty value
+     * brings back the default text.
+     */
+    var emblemText: String
+        get() = prefs.getString(KEY_EMBLEM_TEXT, null)?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_EMBLEM_TEXT
+        set(value) {
+            prefs.edit { putString(KEY_EMBLEM_TEXT, value) }
         }
 }

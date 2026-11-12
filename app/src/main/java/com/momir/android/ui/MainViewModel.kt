@@ -32,6 +32,11 @@ private const val FALLBACK_PREVIEW_WIDTH = 576
 
 private const val MAX_MANA_VALUE = 16
 
+/** The emblem card printed at the start of a game, and the card whose art it uses. */
+private const val EMBLEM_NAME = "Factory of Momir Vig"
+private const val EMBLEM_TYPE = "Emblem"
+private const val EMBLEM_ART_NAME = "Momir Vig, Simic Visionary"
+
 // @JvmOverloads keeps a constructor that takes only the Application, which is what the
 // default ViewModel factory looks for; the other parameters can be replaced in tests.
 class MainViewModel @JvmOverloads constructor(
@@ -268,22 +273,50 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(playWithoutPrinter = v) }
     }
 
-    /** Starts a standard game: one fresh life counter per player, no card on screen. */
+    /**
+     * Starts a standard game: one fresh life counter per player. The Momir emblem is shown
+     * first, in the same popup as a rolled card, so it can be printed.
+     */
     fun startGame() {
+        val emblem = emblemCard()
+        val showPreview = _ui.value.showPreviewImage
+
         _ui.update { state ->
             state.copy(
                 showStartScreen = false,
                 lives = List(state.playerCount) { state.startingLife },
-                showRollDialog = false,
-                card = null,
+                card = emblem,
                 imageUrl = null,
                 previewBitmap = null,
+                showRollDialog = true,
+                message = "Momir emblem",
             )
+        }
+
+        if (showPreview) {
+            generatePreview(emblem)
         }
     }
 
     fun openStartScreen() {
         _ui.update { it.copy(showStartScreen = true, showRollDialog = false) }
+    }
+
+    /** The emblem card; its rules text comes from the settings so it can be edited later. */
+    private fun emblemCard(): Creature = Creature(
+        name = EMBLEM_NAME,
+        manaValue = 0,
+        type = EMBLEM_TYPE,
+        power = "",
+        toughness = "",
+        text = settings.emblemText,
+        manaCost = "",
+        isFunny = false,
+    )
+
+    /** For the future editing screen: an empty text brings back the default. */
+    fun setEmblemText(text: String) {
+        settings.emblemText = text
     }
 
     // ---- Rolling ------------------------------------------------------------------
@@ -512,10 +545,14 @@ class MainViewModel @JvmOverloads constructor(
     private fun previewDriver(): PrinterDriver? =
         if (settings.previewMatchesPrinter) activeDriver() else null
 
+    /** The card whose art is used for [card]: the emblem borrows Momir Vig's art. */
+    private fun artNameFor(card: Creature): String =
+        if (card.name == EMBLEM_NAME) EMBLEM_ART_NAME else card.name
+
     /** Art for [card], cached for the most recent card. Blocking: call from a background thread. */
     private fun artFor(card: Creature): Bitmap? {
         artCache?.let { if (it.first == card.name) return it.second }
-        val art = artRepository.fetchArtCrop(card.name)
+        val art = artRepository.fetchArtCrop(artNameFor(card))
         artCache = card.name to art
         return art
     }

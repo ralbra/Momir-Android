@@ -9,11 +9,13 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
+import kotlin.math.roundToInt
 
 /**
  * Card art from Scryfall. With the "cache art" setting on, art is also read from and saved to
@@ -24,6 +26,17 @@ class ArtRepository(
     private val http: OkHttpClient = OkHttpClient(),
     private val settings: SettingsStore = SettingsStore(context),
 ) {
+    private companion object {
+        // Regular Scryfall art crops are 626 x 457 pixels; the placeholder uses the same format.
+        const val ART_WIDTH = 626
+        const val ART_HEIGHT = 457
+    }
+
+    /** The bundled placeholder, cropped to the art format. Decoded once. */
+    private val dummyArt: Bitmap? by lazy {
+        loadBundledDummyArt()?.let { cropToArtFormat(it) }
+    }
+
     init {
         // Creates .../Android/data/<app>/files/art so that "adb push" has a target folder.
         try {
@@ -60,7 +73,7 @@ class ArtRepository(
             }
         }
 
-        return loadBundledDummyArt() ?: createGeneratedDummyArt(name)
+        return dummyArt ?: createGeneratedDummyArt(name)
     }
 
     private fun downloadArtBytes(name: String): ByteArray? = try {
@@ -150,10 +163,30 @@ class ArtRepository(
         }
     }
 
+    /** Centre-crops to the aspect ratio of downloaded art and scales to its usual size. */
+    private fun cropToArtFormat(src: Bitmap): Bitmap {
+        val targetRatio = ART_WIDTH.toFloat() / ART_HEIGHT.toFloat()
+        val sourceRatio = src.width.toFloat() / src.height.toFloat()
+
+        val cropWidth: Int
+        val cropHeight: Int
+        if (sourceRatio > targetRatio) {
+            cropHeight = src.height
+            cropWidth = (src.height * targetRatio).roundToInt().coerceIn(1, src.width)
+        } else {
+            cropWidth = src.width
+            cropHeight = (src.width / targetRatio).roundToInt().coerceIn(1, src.height)
+        }
+
+        val x = (src.width - cropWidth) / 2
+        val y = (src.height - cropHeight) / 2
+        val cropped = Bitmap.createBitmap(src, x, y, cropWidth, cropHeight)
+        return cropped.scale(ART_WIDTH, ART_HEIGHT)
+    }
+
+    /** Last resort when even the bundled placeholder is missing: drawn at the art format. */
     private fun createGeneratedDummyArt(name: String): Bitmap {
-        val width = 1024
-        val height = 1024
-        val bmp = createBitmap(width, height)
+        val bmp = createBitmap(ART_WIDTH, ART_HEIGHT)
         val canvas = Canvas(bmp)
 
         canvas.drawColor(Color.rgb(242, 244, 248))
@@ -161,39 +194,39 @@ class ArtRepository(
         val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(45, 55, 72)
             style = Paint.Style.STROKE
-            strokeWidth = 10f
+            strokeWidth = 6f
         }
         canvas.drawRect(
-            24f,
-            24f,
-            (width - 24).toFloat(),
-            (height - 24).toFloat(),
+            14f,
+            14f,
+            (ART_WIDTH - 14).toFloat(),
+            (ART_HEIGHT - 14).toFloat(),
             border,
         )
 
         val title = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(45, 55, 72)
-            textSize = 52f
+            textSize = 30f
             typeface = Typeface.DEFAULT_BOLD
             textAlign = Paint.Align.CENTER
         }
 
         val subtitle = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(99, 115, 129)
-            textSize = 36f
+            textSize = 22f
             textAlign = Paint.Align.CENTER
         }
 
         val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(75, 85, 99)
-            textSize = 260f
+            textSize = 170f
             typeface = Typeface.DEFAULT_BOLD
             textAlign = Paint.Align.CENTER
         }
 
-        canvas.drawText("NO ART AVAILABLE", width / 2f, 150f, title)
-        canvas.drawText("offline fallback", width / 2f, 210f, subtitle)
-        canvas.drawText("?", width / 2f, 590f, mark)
+        canvas.drawText("NO ART AVAILABLE", ART_WIDTH / 2f, 70f, title)
+        canvas.drawText("offline fallback", ART_WIDTH / 2f, 104f, subtitle)
+        canvas.drawText("?", ART_WIDTH / 2f, 300f, mark)
 
         val maxName =
             if (name.length > 40) {
@@ -202,7 +235,7 @@ class ArtRepository(
                 name
             }
 
-        canvas.drawText(maxName, width / 2f, 910f, subtitle)
+        canvas.drawText(maxName, ART_WIDTH / 2f, 420f, subtitle)
         return bmp
     }
 }
