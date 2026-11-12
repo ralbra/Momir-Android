@@ -14,6 +14,9 @@ class SettingsStore(context: Context) {
         private const val KEY_BAR_HEIGHT_PERCENT = "bar_height_percent"
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         private const val KEY_CACHE_ART = "cache_art"
+        private const val KEY_PLAYER_COUNT = "player_count"
+        private const val KEY_MOMIR_FORMAT = "momir_format"
+        private const val KEY_PLAY_WITHOUT_PRINTER = "play_without_printer"
 
         const val MIN_BLACKENING = 1
         const val MAX_BLACKENING = 5
@@ -29,6 +32,12 @@ class SettingsStore(context: Context) {
         const val DEFAULT_BAR_HEIGHT_PERCENT = 33
 
         const val DEFAULT_CACHE_ART = false
+
+        const val MIN_PLAYERS = 2
+        const val MAX_PLAYERS = 6
+        const val DEFAULT_PLAYER_COUNT = 2
+        const val DEFAULT_MOMIR_FORMAT = "CLASSIC"
+        const val DEFAULT_PLAY_WITHOUT_PRINTER = false
     }
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -95,5 +104,27 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_CACHE_ART, DEFAULT_CACHE_ART)
         set(value) {
             prefs.edit { putBoolean(KEY_CACHE_ART, value) }
+        }
+
+    /** Number of players chosen on the start screen. */
+    var playerCount: Int
+        get() = prefs.getInt(KEY_PLAYER_COUNT, DEFAULT_PLAYER_COUNT)
+            .coerceIn(MIN_PLAYERS, MAX_PLAYERS)
+        set(value) {
+            prefs.edit { putInt(KEY_PLAYER_COUNT, value.coerceIn(MIN_PLAYERS, MAX_PLAYERS)) }
+        }
+
+    /** Name of the chosen MomirFormat enum entry. */
+    var momirFormat: String
+        get() = prefs.getString(KEY_MOMIR_FORMAT, DEFAULT_MOMIR_FORMAT) ?: DEFAULT_MOMIR_FORMAT
+        set(value) {
+            prefs.edit { putString(KEY_MOMIR_FORMAT, value) }
+        }
+
+    /** Start screen toggle: play without a printer. */
+    var playWithoutPrinter: Boolean
+        get() = prefs.getBoolean(KEY_PLAY_WITHOUT_PRINTER, DEFAULT_PLAY_WITHOUT_PRINTER)
+        set(value) {
+            prefs.edit { putBoolean(KEY_PLAY_WITHOUT_PRINTER, value) }
         }
 }

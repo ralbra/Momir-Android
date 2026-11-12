@@ -71,6 +71,11 @@ class MainViewModel @JvmOverloads constructor(
         val keepScreenOn: Boolean = true,
         val showRollDialog: Boolean = false,
         val cacheArt: Boolean = SettingsStore.DEFAULT_CACHE_ART,
+        // Start screen
+        val showStartScreen: Boolean = true,
+        val playerCount: Int = SettingsStore.DEFAULT_PLAYER_COUNT,
+        val momirFormat: MomirFormat = MomirFormat.CLASSIC,
+        val playWithoutPrinter: Boolean = SettingsStore.DEFAULT_PLAY_WITHOUT_PRINTER,
     )
 
     /** A rendered card, tagged with what it was rendered for. [driverName] is null for the fallback. */
@@ -91,6 +96,10 @@ class MainViewModel @JvmOverloads constructor(
             barHeightPercent = settings.barHeightPercent,
             keepScreenOn = settings.keepScreenOn,
             cacheArt = settings.cacheArt,
+            playerCount = settings.playerCount,
+            momirFormat = MomirFormat.values().firstOrNull { it.name == settings.momirFormat }
+                ?: MomirFormat.CLASSIC,
+            playWithoutPrinter = settings.playWithoutPrinter,
         ),
     )
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -233,6 +242,42 @@ class MainViewModel @JvmOverloads constructor(
     fun setCacheArt(v: Boolean) {
         settings.cacheArt = v
         _ui.update { it.copy(cacheArt = v) }
+    }
+
+    // ---- Start screen -------------------------------------------------------------
+
+    fun setPlayerCount(n: Int) {
+        settings.playerCount = n
+        _ui.update { it.copy(playerCount = settings.playerCount) }
+    }
+
+    fun setMomirFormat(format: MomirFormat) {
+        settings.momirFormat = format.name
+        _ui.update { it.copy(momirFormat = format) }
+    }
+
+    fun setPlayWithoutPrinter(v: Boolean) {
+        settings.playWithoutPrinter = v
+        _ui.update { it.copy(playWithoutPrinter = v) }
+    }
+
+    /** Starts a standard game: fresh life totals, no card on screen. */
+    fun startGame() {
+        _ui.update {
+            it.copy(
+                showStartScreen = false,
+                life1 = it.startingLife,
+                life2 = it.startingLife,
+                showRollDialog = false,
+                card = null,
+                imageUrl = null,
+                previewBitmap = null,
+            )
+        }
+    }
+
+    fun openStartScreen() {
+        _ui.update { it.copy(showStartScreen = true, showRollDialog = false) }
     }
 
     // ---- Rolling ------------------------------------------------------------------

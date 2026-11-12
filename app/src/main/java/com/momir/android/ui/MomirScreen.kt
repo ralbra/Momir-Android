@@ -1,5 +1,6 @@
 package com.momir.android.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -7,6 +8,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -30,6 +33,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,7 +56,7 @@ import androidx.compose.ui.window.Dialog
 import com.momir.android.ble.BleTransport
 
 /**
- * Layout: player 1 (rotated) / control bar / player 2.
+ * Start screen first, then the game: player 1 (rotated) / control bar / player 2.
  * The control bar height is configurable; the two counters share the rest equally.
  */
 @Composable
@@ -63,6 +67,7 @@ fun MomirScreen(
     val ui by vm.ui.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showEndGame by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
 
     val pageColor = if (darkTheme) Color(0xFF0E1625) else Color(0xFFF4F8FF)
@@ -96,61 +101,85 @@ fun MomirScreen(
         }
     }
 
+    // Back in a running game asks before returning to the start screen.
+    BackHandler(enabled = !ui.showStartScreen) { showEndGame = true }
+
     Scaffold(
         containerColor = pageColor,
         snackbarHost = { SnackbarHost(snackbarHost) },
     ) { padding ->
-        val bar = ui.barHeightPercent / 100f
-        val side = (1f - bar) / 2f
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            LifeCounter(
-                life = ui.life1,
-                onDelta = { vm.changeLife(1, it) },
-                background = playerOneColor,
-                contentColor = lifeTextColor,
-                rotated = ui.rotatePlayerOne,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(side),
-            )
-
-            ControlBar(
+        if (ui.showStartScreen) {
+            StartScreen(
                 ui = ui,
-                barColor = barColor,
-                accent = accent,
-                accentText = accentText,
-                outline = outline,
-                onPrinterClick = {
+                onPlayerCount = vm::setPlayerCount,
+                onFormat = vm::setMomirFormat,
+                onPlayWithoutPrinter = vm::setPlayWithoutPrinter,
+                onConnectPrinter = {
                     if (ui.printerState == BleTransport.State.DISCONNECTED) {
                         connectOrPrint()
                     } else {
                         vm.showPrinterInfo()
                     }
                 },
-                onMinus = { vm.changeMv(-1) },
-                onRoll = vm::roll,
-                onPlus = { vm.changeMv(1) },
+                onStartGame = vm::startGame,
                 onSettings = { showSettings = true },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(bar),
+                    .fillMaxSize()
+                    .padding(padding),
             )
+        } else {
+            val bar = ui.barHeightPercent / 100f
+            val side = (1f - bar) / 2f
 
-            LifeCounter(
-                life = ui.life2,
-                onDelta = { vm.changeLife(2, it) },
-                background = playerTwoColor,
-                contentColor = lifeTextColor,
-                rotated = false,
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(side),
-            )
+                    .fillMaxSize()
+                    .padding(padding),
+            ) {
+                LifeCounter(
+                    life = ui.life1,
+                    onDelta = { vm.changeLife(1, it) },
+                    background = playerOneColor,
+                    contentColor = lifeTextColor,
+                    rotated = ui.rotatePlayerOne,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(side),
+                )
+
+                ControlBar(
+                    ui = ui,
+                    barColor = barColor,
+                    accent = accent,
+                    accentText = accentText,
+                    outline = outline,
+                    onPrinterClick = {
+                        if (ui.printerState == BleTransport.State.DISCONNECTED) {
+                            connectOrPrint()
+                        } else {
+                            vm.showPrinterInfo()
+                        }
+                    },
+                    onMinus = { vm.changeMv(-1) },
+                    onRoll = vm::roll,
+                    onPlus = { vm.changeMv(1) },
+                    onSettings = { showSettings = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(bar),
+                )
+
+                LifeCounter(
+                    life = ui.life2,
+                    onDelta = { vm.changeLife(2, it) },
+                    background = playerTwoColor,
+                    contentColor = lifeTextColor,
+                    rotated = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(side),
+                )
+            }
         }
     }
 
@@ -167,6 +196,24 @@ fun MomirScreen(
             ui = ui,
             vm = vm,
             onClose = { showSettings = false },
+        )
+    }
+
+    if (showEndGame) {
+        AlertDialog(
+            onDismissRequest = { showEndGame = false },
+            title = { Text("End current game?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showEndGame = false
+                        vm.openStartScreen()
+                    },
+                ) { Text("Yes") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndGame = false }) { Text("No") }
+            },
         )
     }
 
@@ -203,7 +250,11 @@ private fun ControlBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        PrinterStatusButton(state = ui.printerState, onClick = onPrinterClick)
+        if (ui.playWithoutPrinter) {
+            Spacer(modifier = Modifier.size(56.dp))
+        } else {
+            PrinterStatusButton(state = ui.printerState, onClick = onPrinterClick)
+        }
 
         OutlinedButton(
             onClick = onMinus,

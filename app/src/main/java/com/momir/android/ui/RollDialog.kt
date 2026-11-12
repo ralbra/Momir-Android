@@ -118,12 +118,14 @@ fun RollDialog(
                     ) {
                         Text("Close")
                     }
-                    Button(
-                        onClick = onAction,
-                        enabled = actionEnabled,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(actionLabel)
+                    if (!ui.playWithoutPrinter) {
+                        Button(
+                            onClick = onAction,
+                            enabled = actionEnabled,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(actionLabel)
+                        }
                     }
                 }
             }
