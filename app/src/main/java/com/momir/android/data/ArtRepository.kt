@@ -17,13 +17,22 @@ import java.security.MessageDigest
 
 /**
  * Card art from Scryfall. With the "cache art" setting on, art is also read from and saved to
- * internal storage; without any art a placeholder is drawn so a card can always be printed.
+ * the device; without any art a placeholder is drawn so a card can always be printed.
  */
 class ArtRepository(
     private val context: Context,
     private val http: OkHttpClient = OkHttpClient(),
     private val settings: SettingsStore = SettingsStore(context),
 ) {
+    init {
+        // Creates .../Android/data/<app>/files/art so that "adb push" has a target folder.
+        try {
+            externalArtDir()?.mkdirs()
+        } catch (_: Exception) {
+            // Not having external storage is fine: the internal folder is used instead.
+        }
+    }
+
     /** URL of the full card image shown in the UI (Scryfall "normal" version). */
     fun imageUrl(name: String, version: String = "normal"): String =
         "https://api.scryfall.com/cards/named"
@@ -70,26 +79,43 @@ class ArtRepository(
 
     // ---- Disk cache (only used when the setting is on) ----------------------------
 
-    private fun artDir() = File(context.filesDir, "art")
+    /** App-specific external storage: needs no permission, and "adb push" can fill it. */
+    private fun externalArtDir(): File? =
+        context.getExternalFilesDir(null)?.let { File(it, "art") }
+
+    private fun internalArtDir(): File = File(context.filesDir, "art")
+
+    /** Folders that are searched for cached art, in this order. */
+    private fun readDirs(): List<File> = listOfNotNull(externalArtDir(), internalArtDir())
+
+    /** Where newly downloaded art is saved. */
+    private fun writeDir(): File = externalArtDir() ?: internalArtDir()
 
     /** Must match cache_name() in tools/fetch_art.py: sha256 of the UTF-8 card name. */
-    private fun cacheFile(name: String): File {
+    private fun cacheFileName(name: String): String {
         val hash = MessageDigest.getInstance("SHA-256")
             .digest(name.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
-        return File(artDir(), "$hash.img")
+        return "$hash.img"
     }
 
     private fun readCached(name: String): Bitmap? {
-        val file = cacheFile(name)
-        return if (file.isFile) BitmapFactory.decodeFile(file.path) else null
+        val fileName = cacheFileName(name)
+        for (dir in readDirs()) {
+            val file = File(dir, fileName)
+            if (file.isFile) {
+                BitmapFactory.decodeFile(file.path)?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun writeCache(name: String, bytes: ByteArray) {
         try {
-            artDir().mkdirs()
-            val file = cacheFile(name)
-            val tmp = File(file.parentFile, "${file.name}.tmp")
+            val dir = writeDir()
+            dir.mkdirs()
+            val file = File(dir, cacheFileName(name))
+            val tmp = File(dir, "${file.name}.tmp")
             tmp.writeBytes(bytes)
             if (!tmp.renameTo(file)) tmp.delete()
         } catch (_: Exception) {
