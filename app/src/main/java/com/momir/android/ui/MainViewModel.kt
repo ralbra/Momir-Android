@@ -62,9 +62,10 @@ class MainViewModel @JvmOverloads constructor(
         val printWidth: Int = 576,
         val blackening: Int = SettingsStore.DEFAULT_BLACKENING,
         val previewMatchesPrinter: Boolean = SettingsStore.DEFAULT_PREVIEW_MATCHES_PRINTER,
-        // Life counter and layout
-        val life1: Int = SettingsStore.DEFAULT_STARTING_LIFE,
-        val life2: Int = SettingsStore.DEFAULT_STARTING_LIFE,
+        // Life counters and layout: one entry in [lives] per player
+        val lives: List<Int> = List(SettingsStore.DEFAULT_PLAYER_COUNT) {
+            SettingsStore.DEFAULT_STARTING_LIFE
+        },
         val startingLife: Int = SettingsStore.DEFAULT_STARTING_LIFE,
         val rotatePlayerOne: Boolean = true,
         val barHeightPercent: Int = SettingsStore.DEFAULT_BAR_HEIGHT_PERCENT,
@@ -89,8 +90,7 @@ class MainViewModel @JvmOverloads constructor(
         UiState(
             blackening = settings.blackening,
             previewMatchesPrinter = settings.previewMatchesPrinter,
-            life1 = settings.startingLife,
-            life2 = settings.startingLife,
+            lives = List(settings.playerCount) { settings.startingLife },
             startingLife = settings.startingLife,
             rotatePlayerOne = settings.rotatePlayerOne,
             barHeightPercent = settings.barHeightPercent,
@@ -201,20 +201,27 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    // ---- Life counter -------------------------------------------------------------
+    // ---- Life counters ------------------------------------------------------------
 
+    /** [player] is a 0-based index into the life totals. */
     fun changeLife(player: Int, delta: Int) {
-        _ui.update {
-            if (player == 1) {
-                it.copy(life1 = it.life1 + delta)
+        _ui.update { state ->
+            if (player !in state.lives.indices) {
+                state
             } else {
-                it.copy(life2 = it.life2 + delta)
+                state.copy(
+                    lives = state.lives.mapIndexed { index, life ->
+                        if (index == player) life + delta else life
+                    },
+                )
             }
         }
     }
 
     fun resetLife() {
-        _ui.update { it.copy(life1 = it.startingLife, life2 = it.startingLife) }
+        _ui.update { state ->
+            state.copy(lives = List(state.playerCount) { state.startingLife })
+        }
     }
 
     fun setStartingLife(v: Int) {
@@ -261,13 +268,12 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(playWithoutPrinter = v) }
     }
 
-    /** Starts a standard game: fresh life totals, no card on screen. */
+    /** Starts a standard game: one fresh life counter per player, no card on screen. */
     fun startGame() {
-        _ui.update {
-            it.copy(
+        _ui.update { state ->
+            state.copy(
                 showStartScreen = false,
-                life1 = it.startingLife,
-                life2 = it.startingLife,
+                lives = List(state.playerCount) { state.startingLife },
                 showRollDialog = false,
                 card = null,
                 imageUrl = null,

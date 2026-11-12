@@ -3,6 +3,7 @@ package com.momir.android.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,10 +30,12 @@ private const val LONG_PRESS_STEP = 5
  * Left half: minus, right half: plus. Tap = 1, long press = 5.
  * With [rotated] the whole counter (drawing and touch) is turned by 180 degrees, so the
  * player on the other side of the table gets the same left/right behaviour.
+ * The life text scales with the size of the tile, so 2 to 6 counters fit on the screen.
  */
 @Composable
 fun LifeCounter(
     life: Int,
+    label: String,
     onDelta: (Int) -> Unit,
     background: Color,
     contentColor: Color,
@@ -40,12 +43,22 @@ fun LifeCounter(
     modifier: Modifier = Modifier,
 ) {
     val haptics = LocalHapticFeedback.current
+    val lifeText = life.toString()
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .graphicsLayer { rotationZ = if (rotated) 180f else 0f }
             .background(background),
     ) {
+        val compact = maxWidth < 200.dp
+        val shortSide = if (maxWidth < maxHeight) maxWidth else maxHeight
+        val digitScale = if (lifeText.length > 3) 3f / lifeText.length else 1f
+        val lifeSize = (shortSide.value * 0.42f).coerceIn(32f, 96f) * digitScale
+        val hintSize = if (compact) 24.sp else 44.sp
+        val hintPadding = if (compact) 10.dp else 28.dp
+        val startAlignment = if (compact) Alignment.BottomStart else Alignment.CenterStart
+        val endAlignment = if (compact) Alignment.BottomEnd else Alignment.CenterEnd
+
         Row(modifier = Modifier.fillMaxSize()) {
             TapZone(
                 modifier = Modifier
@@ -72,25 +85,33 @@ fun LifeCounter(
         Text(
             text = "−",
             color = contentColor.copy(alpha = 0.35f),
-            fontSize = 44.sp,
+            fontSize = hintSize,
             modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 28.dp),
+                .align(startAlignment)
+                .padding(horizontal = hintPadding, vertical = 4.dp),
         )
         Text(
             text = "+",
             color = contentColor.copy(alpha = 0.35f),
-            fontSize = 44.sp,
+            fontSize = hintSize,
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 28.dp),
+                .align(endAlignment)
+                .padding(horizontal = hintPadding, vertical = 4.dp),
         )
         Text(
-            text = life.toString(),
+            text = lifeText,
             color = contentColor,
-            fontSize = 96.sp,
+            fontSize = lifeSize.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.Center),
+        )
+        Text(
+            text = label,
+            color = contentColor.copy(alpha = 0.5f),
+            fontSize = 12.sp,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 6.dp),
         )
     }
 }

@@ -56,8 +56,9 @@ import androidx.compose.ui.window.Dialog
 import com.momir.android.ble.BleTransport
 
 /**
- * Start screen first, then the game: player 1 (rotated) / control bar / player 2.
- * The control bar height is configurable; the two counters share the rest equally.
+ * Start screen first, then the game: a top row of life counters (turned 180 degrees), the
+ * control bar, and a bottom row of life counters. 2 to 6 players are split over the two rows.
+ * The control bar height is configurable; the two rows share the rest equally.
  */
 @Composable
 fun MomirScreen(
@@ -71,8 +72,6 @@ fun MomirScreen(
     val snackbarHost = remember { SnackbarHostState() }
 
     val pageColor = if (darkTheme) Color(0xFF0E1625) else Color(0xFFF4F8FF)
-    val playerOneColor = if (darkTheme) Color(0xFF16233A) else Color(0xFFDCE9FF)
-    val playerTwoColor = if (darkTheme) Color(0xFF123027) else Color(0xFFD9F2EA)
     val barColor = if (darkTheme) Color(0xFF182334) else Color.White
     val lifeTextColor = if (darkTheme) Color(0xFFE7EDF8) else Color(0xFF142033)
     val accent = if (darkTheme) Color(0xFF0A8E71) else Color(0xFF006D77)
@@ -131,17 +130,26 @@ fun MomirScreen(
             val bar = ui.barHeightPercent / 100f
             val side = (1f - bar) / 2f
 
+            // Bottom row: (players + 1) / 2 counters, left to right. The top row gets the rest and
+            // runs right to left, so the seating order goes around the table.
+            val players = ui.lives.size
+            val bottomCount = (players + 1) / 2
+            val bottomPlayers = (0 until bottomCount).toList()
+            val topPlayers = (bottomCount until players).toList().reversed()
+            val colors = playerColors(darkTheme)
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
             ) {
-                LifeCounter(
-                    life = ui.life1,
-                    onDelta = { vm.changeLife(1, it) },
-                    background = playerOneColor,
+                PlayerRow(
+                    players = topPlayers,
+                    lives = ui.lives,
+                    colors = colors,
                     contentColor = lifeTextColor,
                     rotated = ui.rotatePlayerOne,
+                    onDelta = vm::changeLife,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(side),
@@ -169,12 +177,13 @@ fun MomirScreen(
                         .weight(bar),
                 )
 
-                LifeCounter(
-                    life = ui.life2,
-                    onDelta = { vm.changeLife(2, it) },
-                    background = playerTwoColor,
+                PlayerRow(
+                    players = bottomPlayers,
+                    lives = ui.lives,
+                    colors = colors,
                     contentColor = lifeTextColor,
                     rotated = false,
+                    onDelta = vm::changeLife,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(side),
@@ -228,6 +237,55 @@ fun MomirScreen(
         )
     }
 }
+
+/** One row of life counters; [players] are indexes into [lives]. */
+@Composable
+private fun PlayerRow(
+    players: List<Int>,
+    lives: List<Int>,
+    colors: List<Color>,
+    contentColor: Color,
+    rotated: Boolean,
+    onDelta: (player: Int, delta: Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier) {
+        players.forEach { index ->
+            LifeCounter(
+                life = lives[index],
+                label = "P${index + 1}",
+                onDelta = { onDelta(index, it) },
+                background = colors[index % colors.size],
+                contentColor = contentColor,
+                rotated = rotated,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            )
+        }
+    }
+}
+
+private fun playerColors(dark: Boolean): List<Color> =
+    if (dark) {
+        listOf(
+            Color(0xFF16233A),
+            Color(0xFF123027),
+            Color(0xFF2A1F3D),
+            Color(0xFF3A2E14),
+            Color(0xFF3A1A1F),
+            Color(0xFF1B2F33),
+        )
+    } else {
+        listOf(
+            Color(0xFFDCE9FF),
+            Color(0xFFD9F2EA),
+            Color(0xFFE8E0F5),
+            Color(0xFFF7EBCB),
+            Color(0xFFF7DADD),
+            Color(0xFFD7ECEF),
+        )
+    }
 
 @Composable
 private fun ControlBar(

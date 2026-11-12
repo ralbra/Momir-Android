@@ -179,7 +179,7 @@ private fun GameSettings(
 
     SettingCheckbox("Cache card art on this device", ui.cacheArt, vm::setCacheArt)
     Text(
-        "Off by default. When on, card art is saved to and read from the app's internal storage, so cards keep their art offline. A fully filled cache uses a lot of storage.",
+        "Off by default. When on, card art is saved to and read from the app's storage folder on this device, so cards keep their art offline. A fully filled cache uses a lot of storage.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -234,7 +234,7 @@ private fun UiSettings(
     ui: MainViewModel.UiState,
     vm: MainViewModel,
 ) {
-    SettingCheckbox("Rotate the top player's counter", ui.rotatePlayerOne, vm::setRotatePlayerOne)
+    SettingCheckbox("Rotate the top row's counters", ui.rotatePlayerOne, vm::setRotatePlayerOne)
     SettingCheckbox("Keep screen on", ui.keepScreenOn, vm::setKeepScreenOn)
     SettingCheckbox("Show card preview in the roll popup", ui.showPreviewImage, vm::setShowPreviewImage)
 
