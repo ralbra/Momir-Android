@@ -81,9 +81,10 @@ fun StartScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "Momir",
+                text = "Randomize the Gathering",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
             )
 
             DropdownField(

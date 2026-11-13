@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fill the Momir app's art cache from Scryfall, following Scryfall's API rules.
+"""Fill the Randomize the Gathering app's art cache from Scryfall, following Scryfall's API rules.
 
 How it stays within the rules:
   * Card -> image URLs come from ONE bulk-data request (Oracle Cards file), not from
@@ -195,7 +195,7 @@ def main(argv=None):
     ap.add_argument("--api-base", default=API_BASE, help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
 
-    ua = "MomirAndroidArtFetcher/1.0" + (f" ({args.contact})" if args.contact else "")
+    ua = "RandomizeTheGatheringArtFetcher/1.0" + (f" ({args.contact})" if args.contact else "")
     client = Client(ua)
     names = load_names(args.creatures_json, args.skip_funny)
     if args.limit:

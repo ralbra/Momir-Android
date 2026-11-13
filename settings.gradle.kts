@@ -17,5 +17,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "momir-android"
+rootProject.name = "randomize-the-gathering"
 include(":app")

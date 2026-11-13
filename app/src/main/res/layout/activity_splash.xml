@@ -8,7 +8,7 @@
         android:id="@+id/splashPoster"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:contentDescription="Momir Printer splash art"
+        android:contentDescription="Randomize the Gathering splash art"
         android:scaleType="fitCenter"
         android:src="@drawable/momir_splash" />
 

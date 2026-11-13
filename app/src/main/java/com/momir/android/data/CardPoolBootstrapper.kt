@@ -32,7 +32,7 @@ class CardPoolBootstrapper(
 
     companion object {
         private const val BULK_INFO_URL = "https://api.scryfall.com/bulk-data/default-cards"
-        private const val USER_AGENT = "momir-android/1.0"
+        private const val USER_AGENT = "randomize-the-gathering/1.0"
         const val POOL_FILE = "card_pool_v1.json"
         private const val DOWNLOAD_FILE = "default_cards.download"
 

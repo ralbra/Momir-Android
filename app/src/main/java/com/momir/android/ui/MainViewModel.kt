@@ -50,7 +50,7 @@ private const val EMBLEM_TYPE = "Emblem"
 private const val EMBLEM_ART_NAME = "Momir Vig, Simic Visionary"
 
 /** The sample ticket printed from the printer settings; it borrows the emblem's art. */
-private const val TEST_TICKET_NAME = "Momir test ticket"
+private const val TEST_TICKET_NAME = "Randomize the Gathering test ticket"
 
 /** Thermal printers print about 8 dots per millimetre (203 dpi). */
 private const val DOTS_PER_MM = 8

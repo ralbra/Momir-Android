@@ -86,7 +86,7 @@ class ArtRepository(
     private fun downloadArtBytes(name: String, back: Boolean): ByteArray? = try {
         val req = Request.Builder()
             .url(imageUrl(name, "art_crop", face = if (back) "back" else null))
-            .header("User-Agent", "momir-android/1.0")
+            .header("User-Agent", "randomize-the-gathering/1.0")
             .header("Accept", "image/*")
             .build()
 

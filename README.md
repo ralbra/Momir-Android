@@ -1,6 +1,8 @@
-# Momir Android
+# Randomize the Gathering
 
-Android app for the Momir printer flow: roll a random creature by mana value, preview the card, and print it on a Bluetooth LE thermal printer.
+Android app for random-card Magic: The Gathering formats such as Momir: roll a random creature by mana value (or a card from your own custom format), preview the card, and print it on a Bluetooth LE thermal printer.
+
+Formerly called Momir Android.
 
 ## Origin
 
