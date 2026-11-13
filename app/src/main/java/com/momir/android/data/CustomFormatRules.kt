@@ -45,13 +45,16 @@ object EmblemText {
                 "Choose $card with mana value X at random. If it's $spellCard, copy it and you may cast " +
                     "the copy without paying its mana cost. Otherwise, create a token that's a copy of it."
         }
+        val chances = f.typeChances().takeIf { it.isNotEmpty() }?.let { list ->
+            " Card type chances: " + list.joinToString(", ") { (type, pct) -> "${type.word.lowercase()} $pct%" } + "."
+        } ?: ""
         val draw = if (f.drawOnCommon) " If that card is common, draw a card." else ""
         val timing = if (f.oncePerTurn) {
             " Activate only as a sorcery and only once each turn."
         } else {
             " Activate only as a sorcery."
         }
-        return "$cost: $effect$draw$timing"
+        return "$cost: $effect$chances$draw$timing"
     }
 
     private fun List<String>.joinOr(): String = when (size) {
@@ -97,10 +100,35 @@ class CustomRoller(
 
     fun count(manaValue: Int): Int = byManaValue[manaValue]?.size ?: 0
 
+    /**
+     * With type chances, first a card type is picked by its chance (types without a card at this
+     * mana value drop out and the others share their chance), then a card of that type. A card
+     * with two types, e.g. an artifact creature, can come from either.
+     */
     fun roll(manaValue: Int, random: Random = Random.Default): CustomRoll? {
-        val (card, printings) = byManaValue[manaValue]?.randomOrNull(random) ?: return null
+        val entries = byManaValue[manaValue] ?: return null
+        val candidates = pickTypeBucket(entries, random) ?: entries
+        val (card, printings) = candidates.randomOrNull(random) ?: return null
         val printing = printings.random(random)
         return CustomRoll(card, printing, pool.sets[printing.setIndex])
+    }
+
+    private fun pickTypeBucket(
+        entries: List<Pair<PoolCard, List<Printing>>>,
+        random: Random,
+    ): List<Pair<PoolCard, List<Printing>>>? {
+        val buckets = format.typeChances().mapNotNull { (type, chance) ->
+            entries.filter { it.first.hasType(type) }
+                .takeIf { it.isNotEmpty() && chance > 0 }
+                ?.let { it to chance }
+        }
+        if (buckets.isEmpty()) return null
+        var ticket = random.nextInt(buckets.sumOf { it.second })
+        for ((bucket, chance) in buckets) {
+            if (ticket < chance) return bucket
+            ticket -= chance
+        }
+        return buckets.last().first
     }
 
     fun isFor(pool: CardPool, format: CustomFormat): Boolean = this.pool === pool && this.format == format

@@ -1,5 +1,10 @@
 package com.momir.android.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -46,10 +52,15 @@ import androidx.compose.ui.window.DialogProperties
 import com.momir.android.data.CustomFormatFilter
 import com.momir.android.model.CardPool
 import com.momir.android.model.CardSet
+import com.momir.android.model.CardType
 import com.momir.android.model.CustomFormat
 import com.momir.android.model.LegalFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+
+private val sliderIn = fadeIn() + expandVertically()
+private val sliderOut = fadeOut() + shrinkVertically()
 
 private enum class WizardSection(val title: String) {
     GENERAL("General"),
@@ -313,21 +324,41 @@ private fun GeneralSection(draft: CustomFormat, nameProblem: String?, vm: MainVi
     )
 
     val typesEnabled = !draft.anyCard
+    val chances = draft.typeChances().toMap()
+    val sliders = draft.usesTypeChances
+
     SettingSwitch("Summon a random Creature", draft.creature, enabled = typesEnabled) { v ->
-        vm.updateDraft { it.copy(creature = v) }
+        vm.updateDraft { it.withType(CardType.CREATURE, v) }
     }
-    SettingSwitch("Summon a random Enchantment", draft.enchantment, enabled = typesEnabled) { v ->
-        vm.updateDraft { it.copy(enchantment = v) }
+    // Creatures get whatever the other types leave over.
+    AnimatedVisibility(visible = sliders && draft.creature, enter = sliderIn, exit = sliderOut) {
+        ChanceSlider(
+            label = "Creature chance",
+            value = draft.creatureChance.coerceAtLeast(0),
+            shown = chances[CardType.CREATURE] ?: 0,
+            enabled = false,
+            onChange = {},
+        )
     }
-    SettingSwitch("Summon a random Artifact", draft.artifact, enabled = typesEnabled) { v ->
-        vm.updateDraft { it.copy(artifact = v) }
+
+    CustomFormat.EXTRA_TYPES.forEach { type ->
+        SettingSwitch("Summon a random ${type.word}", draft.isTypeOn(type), enabled = typesEnabled) { v ->
+            vm.updateDraft { it.withType(type, v) }
+        }
+        AnimatedVisibility(visible = sliders && draft.isTypeOn(type), enter = sliderIn, exit = sliderOut) {
+            ChanceSlider(
+                label = "${type.word} chance",
+                value = draft.storedChance(type),
+                shown = chances[type] ?: 0,
+                enabled = true,
+                onChange = { v -> vm.updateDraft { it.withChance(type, v) } },
+            )
+        }
     }
-    SettingSwitch("Summon a random Instant", draft.instant, enabled = typesEnabled) { v ->
-        vm.updateDraft { it.copy(instant = v) }
+    if (sliders && !draft.creature) {
+        Hint("Creatures are off, so the sliders are weights: the chances shown are scaled to add up to 100%.")
     }
-    SettingSwitch("Summon a random Sorcery", draft.sorcery, enabled = typesEnabled) { v ->
-        vm.updateDraft { it.copy(sorcery = v) }
-    }
+
     SettingSwitch(
         "Summon a complete random card",
         draft.anyCard,
@@ -536,6 +567,31 @@ private fun SetRow(set: CardSet, on: Boolean, onChange: (Boolean) -> Unit) {
             )
         }
         Switch(checked = on, onCheckedChange = onChange)
+    }
+}
+
+/** A 1-100% slider. [shown] is the chance actually used, which can differ from [value] while creatures are off. */
+@Composable
+private fun ChanceSlider(
+    label: String,
+    value: Int,
+    shown: Int,
+    enabled: Boolean,
+    onChange: (Int) -> Unit,
+) {
+    val color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier = Modifier.padding(start = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = color, modifier = Modifier.weight(1f))
+            Text("$shown%", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = color)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt()) },
+            valueRange = 1f..100f,
+            steps = 98,
+            enabled = enabled,
+        )
     }
 }
 

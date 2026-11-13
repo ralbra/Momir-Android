@@ -25,6 +25,10 @@ object CustomFormatCodec {
             w.name("instant").value(f.instant)
             w.name("sorcery").value(f.sorcery)
             w.name("anyCard").value(f.anyCard)
+            w.name("enchantmentChance").value(f.enchantmentChance.toLong())
+            w.name("artifactChance").value(f.artifactChance.toLong())
+            w.name("instantChance").value(f.instantChance.toLong())
+            w.name("sorceryChance").value(f.sorceryChance.toLong())
             w.name("discardCost").value(f.discardCost)
             w.name("drawOnCommon").value(f.drawOnCommon)
             w.name("oncePerTurn").value(f.oncePerTurn)
@@ -76,6 +80,10 @@ object CustomFormatCodec {
                 "instant" -> f.copy(instant = r.nextBoolean())
                 "sorcery" -> f.copy(sorcery = r.nextBoolean())
                 "anyCard" -> f.copy(anyCard = r.nextBoolean())
+                "enchantmentChance" -> f.copy(enchantmentChance = r.nextInt().coerceIn(1, 100))
+                "artifactChance" -> f.copy(artifactChance = r.nextInt().coerceIn(1, 100))
+                "instantChance" -> f.copy(instantChance = r.nextInt().coerceIn(1, 100))
+                "sorceryChance" -> f.copy(sorceryChance = r.nextInt().coerceIn(1, 100))
                 "discardCost" -> f.copy(discardCost = r.nextBoolean())
                 "drawOnCommon" -> f.copy(drawOnCommon = r.nextBoolean())
                 "oncePerTurn" -> f.copy(oncePerTurn = r.nextBoolean())
@@ -95,7 +103,7 @@ object CustomFormatCodec {
             }
         }
         r.endObject()
-        return f.takeIf { it.id.isNotEmpty() }
+        return f.takeIf { it.id.isNotEmpty() }?.fitted()
     }
 
     private fun readStrings(r: JsonReader): List<String> {
