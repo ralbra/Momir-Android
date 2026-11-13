@@ -33,27 +33,6 @@ class AtomicBootstrapper(
         private const val PROCESSED_FILE = "creatures_v3.json"
         private val OLD_PROCESSED_FILES = listOf("creatures_v2.json", "creatures_min.json")
         private const val RETRY_COUNT = 3
-
-        // Layouts whose second face has its own artwork; the others share a single image.
-        private val SEPARATE_ART_LAYOUTS = setOf("transform", "reversible_card")
-
-        /**
-         * A Momir token is a copy of the card, so another face only matters if the token can use
-         * it. A token copy of a transforming card can transform, and a prepare spell is part of
-         * the copiable values, so those keep their other face. The faces of these layouts can
-         * only be used from a card (adventure, omen, modal), are not part of a token (meld,
-         * split, aftermath) or repeat the front (reversible), so only the front is printed.
-         * Layouts that are not listed keep their faces, so a new mechanic is not dropped silently.
-         */
-        private val LAYOUTS_WITHOUT_USABLE_OTHER_FACE = setOf(
-            "adventure",
-            "omen",
-            "modal_dfc",
-            "meld",
-            "split",
-            "aftermath",
-            "reversible_card",
-        )
     }
 
     private val client = OkHttpClient.Builder()
@@ -256,7 +235,7 @@ class AtomicBootstrapper(
      * Entries with a faceName are the faces of one multi-face card. Without faces the array
      * holds variants of the same card, and only the first one is used.
      * The first face must be a creature, as before. The other faces are only kept for layouts
-     * where a Momir token can use them, see [LAYOUTS_WITHOUT_USABLE_OTHER_FACE].
+     * where a Momir token can use them, see [FaceRules.LAYOUTS_WITHOUT_USABLE_OTHER_FACE].
      */
     private fun buildCreature(entries: List<ParsedFace>): Creature? {
         if (entries.isEmpty()) return null
@@ -268,7 +247,7 @@ class AtomicBootstrapper(
         val first = faces.first()
         if (!first.isCreature) return null
 
-        val keepOtherFaces = first.layout !in LAYOUTS_WITHOUT_USABLE_OTHER_FACE
+        val keepOtherFaces = first.layout !in FaceRules.LAYOUTS_WITHOUT_USABLE_OTHER_FACE
         val extra =
             if (keepOtherFaces) {
                 faces.drop(1).map { face ->
@@ -296,7 +275,7 @@ class AtomicBootstrapper(
             isFunny = first.isFunny,
             displayName = first.faceName ?: first.name,
             extraFaces = extra,
-            backHasOwnArt = extra.isNotEmpty() && first.layout in SEPARATE_ART_LAYOUTS,
+            backHasOwnArt = extra.isNotEmpty() && first.layout in FaceRules.SEPARATE_ART_LAYOUTS,
         )
     }
 

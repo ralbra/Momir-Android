@@ -10,8 +10,11 @@ import androidx.lifecycle.viewModelScope
 import com.momir.android.ble.BleTransport
 import com.momir.android.data.ArtRepository
 import com.momir.android.data.AtomicBootstrapper
+import com.momir.android.data.CardPoolBootstrapper
+import com.momir.android.data.CardPoolRepository
 import com.momir.android.data.CardRepository
 import com.momir.android.data.SettingsStore
+import com.momir.android.model.CardPool
 import com.momir.android.model.Creature
 import com.momir.android.printer.PrintOptions
 import com.momir.android.printer.PrinterDriver
@@ -82,6 +85,26 @@ class MainViewModel @JvmOverloads constructor(
         val playerCount: Int = SettingsStore.DEFAULT_PLAYER_COUNT,
         val momirFormat: MomirFormat = MomirFormat.CLASSIC,
         val playWithoutPrinter: Boolean = SettingsStore.DEFAULT_PLAY_WITHOUT_PRINTER,
+        // Card data for custom formats (Scryfall), separate from the Classic creature list
+        val cardPool: CardPoolStatus = CardPoolStatus(),
+    )
+
+    enum class CardPoolState {
+        MISSING,
+        LOADING,
+        DOWNLOADING,
+        READY,
+        FAILED,
+    }
+
+    data class CardPoolStatus(
+        val state: CardPoolState = CardPoolState.MISSING,
+        val cards: Int = 0,
+        val sets: Int = 0,
+        /** "updated_at" of the Scryfall file, e.g. 2026-11-12T22:06:24. */
+        val updatedAt: String = "",
+        /** What is happening right now, or the last error. */
+        val detail: String = "",
     )
 
     /** A rendered card, tagged with what it was rendered for. [driverName] is null for the fallback. */
@@ -129,6 +152,8 @@ class MainViewModel @JvmOverloads constructor(
         ),
     )
 
+    private val cardPoolRepo = CardPoolRepository(CardPoolBootstrapper(app.filesDir))
+
     private val printInProgress = AtomicBoolean(false)
 
     // The art of the current card, so a printer change does not download it again.
@@ -174,6 +199,74 @@ class MainViewModel @JvmOverloads constructor(
                     bootstrapping = false,
                     message = "Bootstrap failed: ${e.message}",
                 )
+            }
+            loadStoredCardPool()
+        }
+    }
+
+    // ---- Card data for custom formats ---------------------------------------------
+
+    private fun updatePool(transform: (CardPoolStatus) -> CardPoolStatus) {
+        _ui.update { it.copy(cardPool = transform(it.cardPool)) }
+    }
+
+    private fun readyStatus(pool: CardPool) = CardPoolStatus(
+        state = CardPoolState.READY,
+        cards = pool.cards.size,
+        sets = pool.sets.size,
+        updatedAt = pool.sourceUpdatedAt.substringBefore('.').replace('T', ' '),
+    )
+
+    /** Loads the stored custom format data, if it was downloaded before. Blocking. */
+    private fun loadStoredCardPool() {
+        if (!cardPoolRepo.hasStoredPool()) return
+        updatePool { it.copy(state = CardPoolState.LOADING, detail = "Loading card data...") }
+        val pool = cardPoolRepo.loadStored()
+        updatePool {
+            if (pool != null) {
+                readyStatus(pool)
+            } else {
+                CardPoolStatus(
+                    state = CardPoolState.FAILED,
+                    detail = "Stored card data could not be read. Download it again.",
+                )
+            }
+        }
+    }
+
+    /** Downloads (or updates) the custom format card data from Scryfall, about 80 MB. */
+    fun downloadCardPool() {
+        val current = _ui.value.cardPool.state
+        if (current == CardPoolState.DOWNLOADING || current == CardPoolState.LOADING) return
+        updatePool { it.copy(state = CardPoolState.DOWNLOADING, detail = "Looking up the card file...") }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pool = cardPoolRepo.download(
+                    onStage = { stage ->
+                        val text = when (stage) {
+                            CardPoolBootstrapper.Stage.LOOKING_UP -> "Looking up the card file..."
+                            CardPoolBootstrapper.Stage.DOWNLOADING -> "Downloading..."
+                            CardPoolBootstrapper.Stage.PROCESSING -> "Processing cards..."
+                            CardPoolBootstrapper.Stage.LOADING -> "Loading card data..."
+                        }
+                        updatePool { it.copy(detail = text) }
+                    },
+                    onProgress = { done, total ->
+                        val mb = done / 1_000_000
+                        val text =
+                            if (total > 0) "Downloading $mb / ${total / 1_000_000} MB" else "Downloading $mb MB"
+                        updatePool { it.copy(detail = text) }
+                    },
+                )
+                _ui.update { it.copy(cardPool = readyStatus(pool)) }
+            } catch (e: Exception) {
+                // Keep whatever was loaded before; only report the error.
+                val previous = cardPoolRepo.pool
+                updatePool {
+                    (if (previous != null) readyStatus(previous) else CardPoolStatus(state = CardPoolState.FAILED))
+                        .copy(detail = "Download failed: ${e.message}")
+                }
             }
         }
     }

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -29,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -274,6 +276,8 @@ private fun DebugSettings(
         onClose()
     }
 
+    CardPoolSettings(ui.cardPool, onDownload = vm::downloadCardPool)
+
     Text("Roll a specific card", fontWeight = FontWeight.Bold)
     Text(
         "Type part of a card name (at least two letters) and pick a result. The card opens in the roll popup like a normal roll, with Print.",
@@ -320,6 +324,64 @@ private fun DebugSettings(
         keyboardActions = KeyboardActions(onDone = { matches.firstOrNull()?.let { show(it) } }),
         modifier = Modifier.fillMaxWidth(),
     )
+}
+
+/** Status of the custom format card data, with a download / update button behind a warning. */
+@Composable
+private fun CardPoolSettings(
+    status: MainViewModel.CardPoolStatus,
+    onDownload: () -> Unit,
+) {
+    var confirm by rememberSaveable { mutableStateOf(false) }
+    val busy = status.state == MainViewModel.CardPoolState.DOWNLOADING ||
+        status.state == MainViewModel.CardPoolState.LOADING
+
+    Text("Custom format card data", fontWeight = FontWeight.Bold)
+    Text(
+        when (status.state) {
+            MainViewModel.CardPoolState.MISSING -> "Not downloaded"
+            MainViewModel.CardPoolState.LOADING -> "Loading..."
+            MainViewModel.CardPoolState.DOWNLOADING -> "Downloading..."
+            MainViewModel.CardPoolState.READY ->
+                "${status.cards} cards in ${status.sets} sets (Scryfall, ${status.updatedAt})"
+            MainViewModel.CardPoolState.FAILED -> "Not available"
+        },
+    )
+    if (status.detail.isNotBlank()) {
+        Text(
+            status.detail,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    OutlinedButton(onClick = { confirm = true }, enabled = !busy) {
+        Text(if (status.state == MainViewModel.CardPoolState.READY) "Update card data" else "Download card data")
+    }
+
+    if (confirm) {
+        AlertDialog(
+            onDismissRequest = { confirm = false },
+            title = { Text("Download card data?") },
+            text = {
+                Text(
+                    "Custom formats need every card with its printings, rarities and sets. " +
+                        "This downloads about 80 MB from Scryfall (Wi-Fi recommended) and stores " +
+                        "about 10 MB on this device. Classic Momir does not need it.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirm = false
+                        onDownload()
+                    },
+                ) { Text("Download") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirm = false }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
