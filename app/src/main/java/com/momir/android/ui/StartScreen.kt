@@ -31,8 +31,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.momir.android.ble.BleTransport
+import com.momir.android.data.SettingsStore
 import com.momir.android.model.FormatChoice
 
 private const val NEW_CUSTOM_LABEL = "<-- New Custom Game -->"
@@ -42,6 +44,7 @@ private const val NEW_CUSTOM_LABEL = "<-- New Custom Game -->"
 fun StartScreen(
     ui: MainViewModel.UiState,
     onPlayerCount: (Int) -> Unit,
+    onStartingLife: (Int) -> Unit,
     onFormat: (FormatChoice) -> Unit,
     /** Opens the wizard: a new format for null, otherwise the saved format with this id. */
     onOpenWizard: (String?) -> Unit,
@@ -84,6 +87,34 @@ fun StartScreen(
                 optionLabel = { "$it players" },
                 onSelect = onPlayerCount,
             )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Starting Life",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedButton(
+                    onClick = { onStartingLife(ui.startingLife - 1) },
+                    enabled = ui.startingLife > SettingsStore.MIN_STARTING_LIFE,
+                ) { Text("\u2212") }
+                Text(
+                    text = ui.startingLife.toString(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.widthIn(min = 48.dp),
+                )
+                OutlinedButton(
+                    onClick = { onStartingLife(ui.startingLife + 1) },
+                    enabled = ui.startingLife < SettingsStore.MAX_STARTING_LIFE,
+                ) { Text("+") }
+            }
 
             val choices = listOf(FormatChoice.Classic) +
                 ui.customFormats.map { FormatChoice.Custom(it.id) } +

@@ -9,6 +9,7 @@ class SettingsStore(context: Context) {
         private const val PREFS_NAME = "momir_settings"
         private const val KEY_BLACKENING = "blackening"
         private const val KEY_PREVIEW_MATCHES_PRINTER = "preview_matches_printer"
+        private const val KEY_PRINT_ART = "print_art"
         private const val KEY_STARTING_LIFE = "starting_life"
         private const val KEY_ROTATE_PLAYER_ONE = "rotate_player_one"
         private const val KEY_BAR_HEIGHT_PERCENT = "bar_height_percent"
@@ -23,6 +24,7 @@ class SettingsStore(context: Context) {
         const val MAX_BLACKENING = 5
         const val DEFAULT_BLACKENING = 3
         const val DEFAULT_PREVIEW_MATCHES_PRINTER = true
+        const val DEFAULT_PRINT_ART = true
 
         const val MIN_STARTING_LIFE = 1
         const val MAX_STARTING_LIFE = 999
@@ -68,7 +70,14 @@ class SettingsStore(context: Context) {
             prefs.edit { putBoolean(KEY_PREVIEW_MATCHES_PRINTER, value) }
         }
 
-    /** Life total both players start with after a reset. */
+    /** false: tickets are printed (and previewed) without card art. */
+    var printArt: Boolean
+        get() = prefs.getBoolean(KEY_PRINT_ART, DEFAULT_PRINT_ART)
+        set(value) {
+            prefs.edit { putBoolean(KEY_PRINT_ART, value) }
+        }
+
+    /** Life total every player starts a new game with. */
     var startingLife: Int
         get() = prefs.getInt(KEY_STARTING_LIFE, DEFAULT_STARTING_LIFE)
             .coerceIn(MIN_STARTING_LIFE, MAX_STARTING_LIFE)

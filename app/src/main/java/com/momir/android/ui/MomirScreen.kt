@@ -111,6 +111,7 @@ fun MomirScreen(
             StartScreen(
                 ui = ui,
                 onPlayerCount = vm::setPlayerCount,
+                onStartingLife = vm::setStartingLife,
                 onFormat = vm::setFormatChoice,
                 onOpenWizard = vm::openWizard,
                 onPlayWithoutPrinter = vm::setPlayWithoutPrinter,

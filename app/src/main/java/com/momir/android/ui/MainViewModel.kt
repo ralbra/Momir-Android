@@ -68,7 +68,6 @@ class MainViewModel @JvmOverloads constructor(
         val bootstrapStage: AtomicBootstrapper.Stage = AtomicBootstrapper.Stage.DOWNLOADING,
         val totalCreatures: Int = 0,
         val selectedMv: Int = 0,
-        val includeFunny: Boolean = false,
         val showPreviewImage: Boolean = true,
         val card: Creature? = null,
         val imageUrl: String? = null,
@@ -78,6 +77,7 @@ class MainViewModel @JvmOverloads constructor(
         val printWidth: Int = 576,
         val blackening: Int = SettingsStore.DEFAULT_BLACKENING,
         val previewMatchesPrinter: Boolean = SettingsStore.DEFAULT_PREVIEW_MATCHES_PRINTER,
+        val printArt: Boolean = SettingsStore.DEFAULT_PRINT_ART,
         // Life counters and layout: one entry in [lives] per player
         val lives: List<Int> = List(SettingsStore.DEFAULT_PLAYER_COUNT) {
             SettingsStore.DEFAULT_STARTING_LIFE
@@ -138,6 +138,7 @@ class MainViewModel @JvmOverloads constructor(
         UiState(
             blackening = settings.blackening,
             previewMatchesPrinter = settings.previewMatchesPrinter,
+            printArt = settings.printArt,
             lives = List(settings.playerCount) { settings.startingLife },
             startingLife = settings.startingLife,
             rotatePlayerOne = settings.rotatePlayerOne,
@@ -340,12 +341,6 @@ class MainViewModel @JvmOverloads constructor(
         }
     }
 
-    fun resetLife() {
-        _ui.update { state ->
-            state.copy(lives = List(state.playerCount) { state.startingLife })
-        }
-    }
-
     fun setStartingLife(v: Int) {
         settings.startingLife = v
         _ui.update { it.copy(startingLife = settings.startingLife) }
@@ -521,10 +516,6 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(selectedMv = (it.selectedMv + delta).coerceIn(0, MAX_MANA_VALUE)) }
     }
 
-    fun setIncludeFunny(v: Boolean) {
-        _ui.value = _ui.value.copy(includeFunny = v)
-    }
-
     fun setBlackening(level: Int) {
         settings.blackening = level
         _ui.update { it.copy(blackening = settings.blackening) }
@@ -535,6 +526,18 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(previewMatchesPrinter = v) }
         // Re-render the visible preview in the newly chosen style.
         refreshPreviewIfPrinterChanged()
+    }
+
+    fun setPrintArt(v: Boolean) {
+        settings.printArt = v
+        _ui.update { it.copy(printArt = v) }
+        // The preview shows the printout: draw the visible card again, with or without art.
+        lastPreview = null
+        val current = _ui.value
+        if (current.showPreviewImage && current.card != null) {
+            _ui.update { it.copy(previewBitmap = null) }
+            generatePreview(current.card)
+        }
     }
 
     fun setShowPreviewImage(v: Boolean) {
@@ -554,7 +557,7 @@ class MainViewModel @JvmOverloads constructor(
             rollCustom(format, state.selectedMv)
             return
         }
-        val c = repo.getRandomCreature(state.selectedMv, state.includeFunny)
+        val c = repo.getRandomCreature(state.selectedMv, includeFunny = false)
 
         if (c == null) {
             _ui.update {
@@ -814,8 +817,12 @@ class MainViewModel @JvmOverloads constructor(
      * Same pipeline as printing: draw at the printer's width, bring it to the printer's
      * geometry and dither it. Without a printer, a plain 576 px render is used.
      */
+    /** No art at all when art printing is off; nothing is downloaded then. */
+    private fun printedArtFor(card: Creature): CardArt =
+        if (settings.printArt) artFor(card) else CardArt(null, null)
+
     private fun renderFor(card: Creature, driver: PrinterDriver?): Bitmap {
-        val art = artFor(card)
+        val art = printedArtFor(card)
         if (driver == null) {
             return CardRenderer.renderCardBitmap(
                 card,
@@ -845,7 +852,7 @@ class MainViewModel @JvmOverloads constructor(
             if (preview != null && driver.renderWidth == FALLBACK_PREVIEW_WIDTH) {
                 preview
             } else {
-                val art = artFor(card)
+                val art = printedArtFor(card)
                 CardRenderer.renderCardBitmap(
                     card,
                     art.front,

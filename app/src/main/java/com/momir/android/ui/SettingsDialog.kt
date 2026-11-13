@@ -19,9 +19,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -165,33 +163,6 @@ private fun GameSettings(
     vm: MainViewModel,
     onClose: () -> Unit,
 ) {
-    Text("Starting life", fontWeight = FontWeight.Bold)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        OutlinedButton(onClick = { vm.setStartingLife(ui.startingLife - 1) }) { Text("−") }
-        Text(ui.startingLife.toString(), style = MaterialTheme.typography.titleLarge)
-        OutlinedButton(onClick = { vm.setStartingLife(ui.startingLife + 1) }) { Text("+") }
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(20, 25, 30, 40).forEach { value ->
-            FilterChip(
-                selected = ui.startingLife == value,
-                onClick = { vm.setStartingLife(value) },
-                label = { Text(value.toString()) },
-            )
-        }
-    }
-    Text(
-        "Applies when the life totals are reset.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Button(onClick = vm::resetLife) { Text("Reset life totals") }
-
-    SettingCheckbox("Include Un-sets", ui.includeFunny, vm::setIncludeFunny)
-
     SettingCheckbox("Cache card art on this device", ui.cacheArt, vm::setCacheArt)
     Text(
         "Off by default. When on, card art is saved to and read from the app's storage folder on this device, so cards keep their art offline. A fully filled cache uses a lot of storage.",
@@ -236,9 +207,9 @@ private fun PrinterSettings(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
-    SettingCheckbox("Preview matches printer output", ui.previewMatchesPrinter, vm::setPreviewMatchesPrinter)
+    SettingCheckbox("Don't print art", !ui.printArt) { vm.setPrintArt(!it) }
     Text(
-        "On: drawn and dithered like the printout. Off: classic 576 px grayscale preview.",
+        "Tickets are printed without the card art: shorter, faster and with less paper. The preview follows.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -252,6 +223,12 @@ private fun UiSettings(
     SettingCheckbox("Rotate the top row's counters", ui.rotatePlayerOne, vm::setRotatePlayerOne)
     SettingCheckbox("Keep screen on", ui.keepScreenOn, vm::setKeepScreenOn)
     SettingCheckbox("Show card preview in the roll popup", ui.showPreviewImage, vm::setShowPreviewImage)
+    SettingCheckbox("Preview matches printer output", ui.previewMatchesPrinter, vm::setPreviewMatchesPrinter)
+    Text(
+        "On: drawn and dithered like the printout. Off: classic 576 px grayscale preview.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 
     Text("Controls bar height: ${ui.barHeightPercent}% of the screen")
     Slider(
