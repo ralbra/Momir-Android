@@ -10,6 +10,8 @@ How it stays within the rules:
   * Images are stored unmodified (no resizing, no colour change).
 
 Output: one file per card, named like the app's cache: sha256(card name) + ".img".
+Double-faced cards whose back face has its own artwork (transform, modal) get a second
+file for the back, named after sha256(card name + "|back").
 Re-running resumes: files that already exist are skipped.
 
 Usage:
@@ -35,9 +37,10 @@ API_BASE = "https://api.scryfall.com"
 CREDIT_NOTE = "Art (c) the respective artists; images (c) Wizards of the Coast, via Scryfall."
 
 
-def cache_name(card_name: str) -> str:
-    """Must match ArtRepository.cacheFile() in the app."""
-    return hashlib.sha256(card_name.encode("utf-8")).hexdigest() + ".img"
+def cache_name(card_name: str, back: bool = False) -> str:
+    """Must match ArtRepository.cacheFileName() in the app."""
+    key = card_name + "|back" if back else card_name
+    return hashlib.sha256(key.encode("utf-8")).hexdigest() + ".img"
 
 
 def norm(name: str) -> str:
@@ -116,16 +119,22 @@ def parse_cards(blob: bytes):
 
 
 def image_info(card: dict, version: str):
-    """(url, artist) for the front face, or None."""
+    """(front url, artist, back url or None), or None when there is no front image."""
     uris = card.get("image_uris")
     artist = card.get("artist", "")
-    if not uris and card.get("card_faces"):
-        face = card["card_faces"][0]
+    faces = card.get("card_faces") or []
+    back_url = None
+    if not uris and faces:
+        face = faces[0]
         uris = face.get("image_uris")
         artist = face.get("artist") or artist
+        if len(faces) > 1:
+            back_uris = faces[1].get("image_uris")
+            if back_uris and version in back_uris:
+                back_url = back_uris[version]
     if not uris or version not in uris:
         return None
-    return uris[version], artist
+    return uris[version], artist, back_url
 
 
 def build_index(client: Client, api_base: str, version: str):
@@ -204,13 +213,15 @@ def main(argv=None):
         if info is None:
             missing.append(name)
             continue
-        url, artist = info
+        url, artist, back_url = info
         credits[name] = artist
         jobs.append((name, url, args.out / cache_name(name)))
+        if back_url:
+            jobs.append((name + " (back)", back_url, args.out / cache_name(name, back=True)))
 
     todo = [j for j in jobs if not (j[2].exists() and j[2].stat().st_size > 0)]
     skipped = len(jobs) - len(todo)
-    print(f"{len(jobs)} matched, {skipped} already present, {len(todo)} to download, {len(missing)} not found")
+    print(f"{len(jobs)} images matched, {skipped} already present, {len(todo)} to download, {len(missing)} names not found")
 
     done = failed = total_bytes = 0
     failures = []
@@ -247,7 +258,7 @@ def main(argv=None):
         print(f"Wrote {args.tar}")
 
     size = sum(f.stat().st_size for f in args.out.glob("*.img"))
-    print(f"Done: {done} downloaded, {skipped} skipped, {failed} failed, {len(missing)} not found.")
+    print(f"Done: {done} downloaded, {skipped} skipped, {failed} failed, {len(missing)} names not found.")
     print(f"Cache folder: {len(list(args.out.glob('*.img')))} files, {size / 1e6:.0f} MB. Details in {problems.name}")
     return 0 if not failed else 1
 

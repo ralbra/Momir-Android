@@ -281,16 +281,7 @@ private fun DebugSettings(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 
-    OutlinedTextField(
-        value = query,
-        onValueChange = { query = it },
-        label = { Text("Card name") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { matches.firstOrNull()?.let { show(it) } }),
-        modifier = Modifier.fillMaxWidth(),
-    )
-
+    // The results are above the input field so the keyboard does not cover them.
     when {
         query.trim().length < 2 -> Unit
 
@@ -302,6 +293,8 @@ private fun DebugSettings(
             )
 
         else -> matches.forEach { card ->
+            val faces =
+                if (card.extraFaces.isEmpty()) "" else ", ${1 + card.extraFaces.size} faces"
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -310,13 +303,23 @@ private fun DebugSettings(
             ) {
                 Text(card.name, fontWeight = FontWeight.SemiBold)
                 Text(
-                    "MV ${card.manaValue}, ${card.type}",
+                    "MV ${card.manaValue}, ${card.type}$faces",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
     }
+
+    OutlinedTextField(
+        value = query,
+        onValueChange = { query = it },
+        label = { Text("Card name") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { matches.firstOrNull()?.let { show(it) } }),
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

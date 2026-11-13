@@ -91,6 +91,12 @@ class MainViewModel @JvmOverloads constructor(
         val bitmap: Bitmap,
     )
 
+    /** The art of a card: the front face and, for double-faced cards, the back face. */
+    private class CardArt(
+        val front: Bitmap?,
+        val back: Bitmap?,
+    )
+
     private val _ui = MutableStateFlow(
         UiState(
             blackening = settings.blackening,
@@ -127,7 +133,7 @@ class MainViewModel @JvmOverloads constructor(
 
     // The art of the current card, so a printer change does not download it again.
     @Volatile
-    private var artCache: Pair<String, Bitmap?>? = null
+    private var artCache: Pair<String, CardArt>? = null
 
     // The last preview, reused for printing where that gives the same result.
     @Volatile
@@ -563,10 +569,19 @@ class MainViewModel @JvmOverloads constructor(
     private fun artNameFor(card: Creature): String =
         if (card.name == EMBLEM_NAME) EMBLEM_ART_NAME else card.name
 
-    /** Art for [card], cached for the most recent card. Blocking: call from a background thread. */
-    private fun artFor(card: Creature): Bitmap? {
+    /**
+     * Art for [card], cached for the most recent card. The back face art is only fetched for
+     * double-faced cards whose back has its own artwork. Blocking: call from a background thread.
+     */
+    private fun artFor(card: Creature): CardArt {
         artCache?.let { if (it.first == card.name) return it.second }
-        val art = artRepository.fetchArtCrop(artNameFor(card))
+
+        val artName = artNameFor(card)
+        val front = artRepository.fetchArtCrop(artName)
+        val back =
+            if (card.backHasOwnArt) artRepository.fetchArtCrop(artName, back = true) else null
+
+        val art = CardArt(front, back)
         artCache = card.name to art
         return art
     }
@@ -578,9 +593,19 @@ class MainViewModel @JvmOverloads constructor(
     private fun renderFor(card: Creature, driver: PrinterDriver?): Bitmap {
         val art = artFor(card)
         if (driver == null) {
-            return CardRenderer.renderCardBitmap(card, art, printWidth = FALLBACK_PREVIEW_WIDTH)
+            return CardRenderer.renderCardBitmap(
+                card,
+                art.front,
+                printWidth = FALLBACK_PREVIEW_WIDTH,
+                backArt = art.back,
+            )
         }
-        val drawn = CardRenderer.renderCardBitmap(card, art, printWidth = driver.renderWidth)
+        val drawn = CardRenderer.renderCardBitmap(
+            card,
+            art.front,
+            printWidth = driver.renderWidth,
+            backArt = art.back,
+        )
         return Monochrome.toMonochrome(driver.prepare(drawn))
     }
 
@@ -596,7 +621,13 @@ class MainViewModel @JvmOverloads constructor(
             if (preview != null && driver.renderWidth == FALLBACK_PREVIEW_WIDTH) {
                 preview
             } else {
-                CardRenderer.renderCardBitmap(card, artFor(card), printWidth = driver.renderWidth)
+                val art = artFor(card)
+                CardRenderer.renderCardBitmap(
+                    card,
+                    art.front,
+                    printWidth = driver.renderWidth,
+                    backArt = art.back,
+                )
             }
         return driver.prepare(drawn)
     }

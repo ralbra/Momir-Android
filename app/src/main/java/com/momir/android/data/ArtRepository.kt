@@ -46,29 +46,36 @@ class ArtRepository(
         }
     }
 
-    /** URL of the full card image shown in the UI (Scryfall "normal" version). */
-    fun imageUrl(name: String, version: String = "normal"): String =
-        "https://api.scryfall.com/cards/named"
+    /**
+     * URL of a card image (Scryfall "normal" version by default). With [face] = "back" the
+     * back face of a double-faced card is returned.
+     */
+    fun imageUrl(name: String, version: String = "normal", face: String? = null): String {
+        val builder = "https://api.scryfall.com/cards/named"
             .toHttpUrl()
             .newBuilder()
             .addQueryParameter("exact", name)
             .addQueryParameter("format", "image")
             .addQueryParameter("version", version)
-            .build()
-            .toString()
+        if (face != null) builder.addQueryParameter("face", face)
+        return builder.build().toString()
+    }
 
-    /** Blocking: run it on a background thread. */
-    fun fetchArtCrop(name: String): Bitmap? {
+    /**
+     * Art crop of [name]; with [back] the art of the back face of a double-faced card.
+     * Blocking: run it on a background thread.
+     */
+    fun fetchArtCrop(name: String, back: Boolean = false): Bitmap? {
         val useCache = settings.cacheArt
         if (useCache) {
-            readCached(name)?.let { return it }
+            readCached(name, back)?.let { return it }
         }
 
-        val bytes = downloadArtBytes(name)
+        val bytes = downloadArtBytes(name, back)
         if (bytes != null) {
             val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             if (bitmap != null) {
-                if (useCache) writeCache(name, bytes)
+                if (useCache) writeCache(name, back, bytes)
                 return bitmap
             }
         }
@@ -76,9 +83,9 @@ class ArtRepository(
         return dummyArt ?: createGeneratedDummyArt(name)
     }
 
-    private fun downloadArtBytes(name: String): ByteArray? = try {
+    private fun downloadArtBytes(name: String, back: Boolean): ByteArray? = try {
         val req = Request.Builder()
-            .url(imageUrl(name, "art_crop"))
+            .url(imageUrl(name, "art_crop", face = if (back) "back" else null))
             .header("User-Agent", "momir-android/1.0")
             .header("Accept", "image/*")
             .build()
@@ -104,16 +111,20 @@ class ArtRepository(
     /** Where newly downloaded art is saved. */
     private fun writeDir(): File = externalArtDir() ?: internalArtDir()
 
-    /** Must match cache_name() in tools/fetch_art.py: sha256 of the UTF-8 card name. */
-    private fun cacheFileName(name: String): String {
+    /**
+     * Must match cache_name() in tools/fetch_art.py: sha256 of the UTF-8 card name, or of
+     * "<name>|back" for the art of a back face.
+     */
+    private fun cacheFileName(name: String, back: Boolean): String {
+        val key = if (back) "$name|back" else name
         val hash = MessageDigest.getInstance("SHA-256")
-            .digest(name.toByteArray(Charsets.UTF_8))
+            .digest(key.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
         return "$hash.img"
     }
 
-    private fun readCached(name: String): Bitmap? {
-        val fileName = cacheFileName(name)
+    private fun readCached(name: String, back: Boolean): Bitmap? {
+        val fileName = cacheFileName(name, back)
         for (dir in readDirs()) {
             val file = File(dir, fileName)
             if (file.isFile) {
@@ -123,11 +134,11 @@ class ArtRepository(
         return null
     }
 
-    private fun writeCache(name: String, bytes: ByteArray) {
+    private fun writeCache(name: String, back: Boolean, bytes: ByteArray) {
         try {
             val dir = writeDir()
             dir.mkdirs()
-            val file = File(dir, cacheFileName(name))
+            val file = File(dir, cacheFileName(name, back))
             val tmp = File(dir, "${file.name}.tmp")
             tmp.writeBytes(bytes)
             if (!tmp.renameTo(file)) tmp.delete()

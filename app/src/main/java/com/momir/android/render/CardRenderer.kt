@@ -3,6 +3,7 @@ package com.momir.android.render
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.core.graphics.createBitmap
@@ -15,8 +16,85 @@ object CardRenderer {
     private const val MIN_WRAP_WIDTH = 60f
     private const val MIN_NAME_SHARE = 0.4f
     private const val COMPACT_MANA = false
+    private const val FACE_GAP = 32
 
-    fun renderCardBitmap(creature: Creature, artBitmap: Bitmap?, printWidth: Int = 576): Bitmap {
+    /**
+     * Prints the front face, and every other face of a multi-face card complete below it,
+     * separated by a dashed line. [backArt] is the art of the second face, if it has its own.
+     */
+    fun renderCardBitmap(
+        creature: Creature,
+        artBitmap: Bitmap?,
+        printWidth: Int = 576,
+        backArt: Bitmap? = null,
+    ): Bitmap {
+        val front = renderFace(
+            name = creature.displayName,
+            manaCost = creature.manaCost,
+            type = creature.type,
+            power = creature.power,
+            toughness = creature.toughness,
+            text = creature.text,
+            artBitmap = artBitmap,
+            printWidth = printWidth,
+        )
+        if (creature.extraFaces.isEmpty()) return front
+
+        val parts = mutableListOf(front)
+        creature.extraFaces.forEachIndexed { index, face ->
+            val art = if (index == 0 && creature.backHasOwnArt) backArt else null
+            parts.add(
+                renderFace(
+                    name = face.name,
+                    manaCost = face.manaCost,
+                    type = face.type,
+                    power = face.power,
+                    toughness = face.toughness,
+                    text = face.text,
+                    artBitmap = art,
+                    printWidth = printWidth,
+                )
+            )
+        }
+        return stack(parts, printWidth)
+    }
+
+    /** Puts the faces below each other with a dashed cut line between them. */
+    private fun stack(parts: List<Bitmap>, printWidth: Int): Bitmap {
+        val total = parts.sumOf { it.height } + FACE_GAP * (parts.size - 1)
+        val out = createBitmap(printWidth, total.coerceAtLeast(1))
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.WHITE)
+
+        val dashed = Paint().apply {
+            color = Color.BLACK
+            strokeWidth = 3f
+            pathEffect = DashPathEffect(floatArrayOf(14f, 10f), 0f)
+        }
+
+        var y = 0
+        parts.forEachIndexed { index, part ->
+            if (index > 0) {
+                val middle = y + FACE_GAP / 2f
+                canvas.drawLine(PADDING, middle, printWidth - PADDING, middle, dashed)
+                y += FACE_GAP
+            }
+            canvas.drawBitmap(part, 0f, y.toFloat(), null)
+            y += part.height
+        }
+        return out
+    }
+
+    private fun renderFace(
+        name: String,
+        manaCost: String,
+        type: String,
+        power: String,
+        toughness: String,
+        text: String,
+        artBitmap: Bitmap?,
+        printWidth: Int,
+    ): Bitmap {
         val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 36f
             color = Color.BLACK
@@ -43,22 +121,23 @@ object CardRenderer {
         val textLineHeight = 28f
         val nameLineHeight = 40f
         val typeLineHeight = 30f
-        val ptHeight = if (creature.power.isNotBlank() && creature.toughness.isNotBlank()) 42f else 0f
+        val hasPt = power.isNotBlank() && toughness.isNotBlank()
+        val ptHeight = if (hasPt) 42f else 0f
 
-        val manaText = if (COMPACT_MANA) compactMana(creature.manaCost) else creature.manaCost
+        val manaText = if (COMPACT_MANA) compactMana(manaCost) else manaCost
         val manaWidth = if (manaText.isNotBlank()) namePaint.measureText(manaText) else 0f
 
         // Name beside the cost, or the cost on its own row when the name would be squeezed.
         val besideWidth =
             (contentWidth - manaWidth - NAME_MANA_GAP).coerceAtLeast(MIN_WRAP_WIDTH)
-        val fullLines = wrapLines(creature.name, namePaint, contentWidth)
-        val besideLines = wrapLines(creature.name, namePaint, besideWidth)
+        val fullLines = wrapLines(name, namePaint, contentWidth)
+        val besideLines = wrapLines(name, namePaint, besideWidth)
         val manaOwnLine =
             manaWidth > 0f &&
                     (besideLines.size > fullLines.size || besideWidth < contentWidth * MIN_NAME_SHARE)
 
         val nameLines = (if (manaOwnLine) fullLines else besideLines).ifEmpty { listOf("") }
-        val typeLines = wrapLines(creature.type, typePaint, contentWidth).ifEmpty { listOf("") }
+        val typeLines = wrapLines(type, typePaint, contentWidth).ifEmpty { listOf("") }
         val extraNameHeight =
             (nameLines.size - 1) * nameLineHeight + (if (manaOwnLine) nameLineHeight else 0f)
         val extraTypeHeight = (typeLines.size - 1) * typeLineHeight
@@ -67,7 +146,7 @@ object CardRenderer {
             val scaledHeight = (printWidth.toFloat() * (it.height.toFloat() / it.width.toFloat())).toInt()
             it.scale(printWidth, scaledHeight)
         }
-        val rulesLines = wrapLines(creature.text, textPaint, contentWidth)
+        val rulesLines = wrapLines(text, textPaint, contentWidth)
         val rulesHeight = if (rulesLines.isEmpty()) 0f else rulesLines.size * textLineHeight + 12f
 
         var totalHeight = 0f
@@ -118,8 +197,8 @@ object CardRenderer {
             y += 8f
         }
 
-        if (creature.power.isNotBlank() && creature.toughness.isNotBlank()) {
-            val pt = "${creature.power} / ${creature.toughness}"
+        if (hasPt) {
+            val pt = "$power / $toughness"
             val pw = ptPaint.measureText(pt)
             canvas.drawText(pt, printWidth - PADDING - pw, y + 32f, ptPaint)
         }

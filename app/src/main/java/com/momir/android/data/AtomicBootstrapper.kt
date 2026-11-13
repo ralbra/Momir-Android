@@ -1,5 +1,6 @@
 package com.momir.android.data
 
+import com.momir.android.model.CardFace
 import com.momir.android.model.Creature
 import com.squareup.moshi.JsonReader
 import okhttp3.OkHttpClient
@@ -26,8 +27,14 @@ class AtomicBootstrapper(
     companion object {
         private const val ATOMIC_URL = "https://mtgjson.com/api/v5/AtomicCards.json"
         private const val RAW_FILE = "AtomicCards.json"
-        private const val PROCESSED_FILE = "creatures_min.json"
+
+        // v2 also stores the faces of multi-face cards. It is rebuilt from the raw download.
+        private const val PROCESSED_FILE = "creatures_v2.json"
+        private const val LEGACY_PROCESSED_FILE = "creatures_min.json"
         private const val RETRY_COUNT = 3
+
+        // Layouts whose second face has its own artwork; the others share a single image.
+        private val SEPARATE_ART_LAYOUTS = setOf("transform", "modal_dfc", "reversible_card")
     }
 
     private val client = OkHttpClient.Builder()
@@ -49,7 +56,9 @@ class AtomicBootstrapper(
             processAtomic(raw, processed)
         }
         onStage(Stage.LOADING)
-        return loadProcessed(processed)
+        val result = loadProcessed(processed)
+        File(appDir, LEGACY_PROCESSED_FILE).delete()
+        return result
     }
 
     fun forceRefresh(onStage: (Stage) -> Unit = {}): Map<Int, List<Creature>> {
@@ -61,7 +70,9 @@ class AtomicBootstrapper(
         onStage(Stage.PROCESSING)
         processAtomic(raw, processed)
         onStage(Stage.LOADING)
-        return loadProcessed(processed)
+        val result = loadProcessed(processed)
+        File(appDir, LEGACY_PROCESSED_FILE).delete()
+        return result
     }
 
     /** Copies the database bundled in assets, if there is one. */
@@ -142,17 +153,35 @@ class AtomicBootstrapper(
         byMv.toSortedMap().forEach { (mv, list) ->
             val arr = JSONArray()
             list.forEach { c ->
-                arr.put(
-                    JSONObject()
-                        .put("n", c.name)
-                        .put("mv", c.manaValue)
-                        .put("t", c.type)
-                        .put("p", c.power)
-                        .put("h", c.toughness)
-                        .put("x", c.text)
-                        .put("m", c.manaCost)
-                        .put("f", c.isFunny)
-                )
+                val o = JSONObject()
+                    .put("n", c.name)
+                    .put("fn", c.displayName)
+                    .put("mv", c.manaValue)
+                    .put("t", c.type)
+                    .put("p", c.power)
+                    .put("h", c.toughness)
+                    .put("x", c.text)
+                    .put("m", c.manaCost)
+                    .put("f", c.isFunny)
+                    .put("ba", c.backHasOwnArt)
+
+                if (c.extraFaces.isNotEmpty()) {
+                    val faces = JSONArray()
+                    c.extraFaces.forEach { face ->
+                        faces.put(
+                            JSONObject()
+                                .put("n", face.name)
+                                .put("m", face.manaCost)
+                                .put("t", face.type)
+                                .put("p", face.power)
+                                .put("h", face.toughness)
+                                .put("x", face.text)
+                        )
+                    }
+                    o.put("ef", faces)
+                }
+
+                arr.put(o)
             }
             root.put(mv.toString(), arr)
         }
@@ -165,30 +194,87 @@ class AtomicBootstrapper(
         }
     }
 
+    /** One entry of a card's array in AtomicCards.json: a face, or a variant of the card. */
+    private class ParsedFace(
+        val name: String,
+        val faceName: String?,
+        val side: String?,
+        val layout: String,
+        val manaValue: Int,
+        val type: String,
+        val power: String,
+        val toughness: String,
+        val text: String,
+        val manaCost: String,
+        val isFunny: Boolean,
+        val isCreature: Boolean,
+    )
+
     private fun parseDataObject(reader: JsonReader, byMv: MutableMap<Int, MutableList<Creature>>) {
         reader.beginObject()
         while (reader.hasNext()) {
             val cardName = reader.nextName()
             reader.beginArray()
-            var firstCreature: Creature? = null
-
-            if (reader.hasNext()) {
-                firstCreature = parsePrinting(reader, cardName)
-            }
+            val entries = mutableListOf<ParsedFace>()
             while (reader.hasNext()) {
-                reader.skipValue()
+                entries.add(parseFace(reader, cardName))
             }
             reader.endArray()
 
-            if (firstCreature != null) {
-                byMv.getOrPut(firstCreature.manaValue) { mutableListOf() }.add(firstCreature)
+            val creature = buildCreature(entries)
+            if (creature != null) {
+                byMv.getOrPut(creature.manaValue) { mutableListOf() }.add(creature)
             }
         }
         reader.endObject()
     }
 
-    private fun parsePrinting(reader: JsonReader, fallbackName: String): Creature? {
+    /**
+     * Entries with a faceName are the faces of one multi-face card. Without faces the array
+     * holds variants of the same card, and only the first one is used.
+     * The first face must be a creature, as before.
+     */
+    private fun buildCreature(entries: List<ParsedFace>): Creature? {
+        if (entries.isEmpty()) return null
+
+        val named = entries.filter { it.faceName != null }
+        val faces =
+            if (named.size >= 2) named.sortedBy { it.side ?: "a" } else listOf(entries.first())
+
+        val first = faces.first()
+        if (!first.isCreature) return null
+
+        val extra = faces.drop(1).map { face ->
+            CardFace(
+                name = face.faceName ?: face.name,
+                manaCost = face.manaCost,
+                type = face.type,
+                power = face.power,
+                toughness = face.toughness,
+                text = face.text,
+            )
+        }
+
+        return Creature(
+            name = first.name,
+            manaValue = first.manaValue,
+            type = first.type,
+            power = first.power,
+            toughness = first.toughness,
+            text = first.text,
+            manaCost = first.manaCost,
+            isFunny = first.isFunny,
+            displayName = first.faceName ?: first.name,
+            extraFaces = extra,
+            backHasOwnArt = extra.isNotEmpty() && first.layout in SEPARATE_ART_LAYOUTS,
+        )
+    }
+
+    private fun parseFace(reader: JsonReader, fallbackName: String): ParsedFace {
         var name = fallbackName
+        var faceName: String? = null
+        var side: String? = null
+        var layout = ""
         var manaValue = 0
         var type = ""
         var power = ""
@@ -202,6 +288,9 @@ class AtomicBootstrapper(
         while (reader.hasNext()) {
             when (reader.nextName()) {
                 "name" -> name = reader.nextString()
+                "faceName" -> faceName = nextStringOrEmpty(reader).ifEmpty { null }
+                "side" -> side = nextStringOrEmpty(reader).ifEmpty { null }
+                "layout" -> layout = nextStringOrEmpty(reader)
                 "manaValue" -> manaValue = reader.nextDouble().toInt()
                 "type" -> type = reader.nextString()
                 "power" -> power = nextStringOrEmpty(reader)
@@ -217,9 +306,11 @@ class AtomicBootstrapper(
         }
         reader.endObject()
 
-        if (!isCreature) return null
-        return Creature(
+        return ParsedFace(
             name = name,
+            faceName = faceName,
+            side = side,
+            layout = layout,
             manaValue = manaValue,
             type = type,
             power = power,
@@ -227,6 +318,7 @@ class AtomicBootstrapper(
             text = text,
             manaCost = manaCost,
             isFunny = isFunny,
+            isCreature = isCreature,
         )
     }
 
@@ -259,6 +351,26 @@ class AtomicBootstrapper(
             val cards = mutableListOf<Creature>()
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+
+                // Files written before faces were stored have no "ef", "fn" or "ba".
+                val faceArray = o.optJSONArray("ef")
+                val extraFaces =
+                    if (faceArray == null) {
+                        emptyList()
+                    } else {
+                        (0 until faceArray.length()).map { j ->
+                            val f = faceArray.getJSONObject(j)
+                            CardFace(
+                                name = f.optString("n"),
+                                manaCost = f.optString("m"),
+                                type = f.optString("t"),
+                                power = f.optString("p"),
+                                toughness = f.optString("h"),
+                                text = f.optString("x"),
+                            )
+                        }
+                    }
+
                 cards.add(
                     Creature(
                         name = o.optString("n"),
@@ -269,6 +381,9 @@ class AtomicBootstrapper(
                         text = o.optString("x"),
                         manaCost = o.optString("m"),
                         isFunny = o.optBoolean("f"),
+                        displayName = o.optString("fn").ifEmpty { o.optString("n") },
+                        extraFaces = extraFaces,
+                        backHasOwnArt = o.optBoolean("ba"),
                     )
                 )
             }
