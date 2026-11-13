@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,11 +45,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.momir.android.ble.BleTransport
+import com.momir.android.data.SettingsStore
 import com.momir.android.model.Creature
 import kotlin.math.roundToInt
 
 private enum class SettingsSection(val title: String) {
-    GAME("Game"),
+    CARD_DATA("Card data"),
     PRINTER("Printer"),
     UI("UI"),
     DEBUG("Debug"),
@@ -60,9 +63,9 @@ fun SettingsDialog(
     vm: MainViewModel,
     onClose: () -> Unit,
 ) {
-    var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(SettingsSection.GAME) }
+    var expanded by rememberSaveable { mutableStateOf<SettingsSection?>(SettingsSection.CARD_DATA) }
     val sections = listOf(
-        SettingsSection.GAME,
+        SettingsSection.CARD_DATA,
         SettingsSection.PRINTER,
         SettingsSection.UI,
         SettingsSection.DEBUG,
@@ -101,7 +104,7 @@ fun SettingsDialog(
                             onToggle = { expanded = if (expanded == section) null else section },
                         ) {
                             when (section) {
-                                SettingsSection.GAME -> GameSettings(ui, vm, onClose)
+                                SettingsSection.CARD_DATA -> CardDataSettings(ui, vm, onClose)
                                 SettingsSection.PRINTER -> PrinterSettings(ui, vm)
                                 SettingsSection.UI -> UiSettings(ui, vm)
                                 SettingsSection.DEBUG -> DebugSettings(ui, vm, onClose)
@@ -158,18 +161,17 @@ internal fun AccordionSection(
 }
 
 @Composable
-private fun GameSettings(
+private fun CardDataSettings(
     ui: MainViewModel.UiState,
     vm: MainViewModel,
     onClose: () -> Unit,
 ) {
-    SettingCheckbox("Cache card art on this device", ui.cacheArt, vm::setCacheArt)
+    Text("Classic card database", fontWeight = FontWeight.Bold)
     Text(
-        "Off by default. When on, card art is saved to and read from the app's storage folder on this device, so cards keep their art offline. A fully filled cache uses a lot of storage.",
+        "${ui.totalCreatures} creatures (MTGJSON).",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-
     OutlinedButton(
         onClick = {
             vm.refreshAtomicJson()
@@ -179,6 +181,17 @@ private fun GameSettings(
     ) {
         Text("Update card database")
     }
+
+    HorizontalDivider()
+    CardPoolSettings(ui.cardPool, onDownload = vm::downloadCardPool)
+
+    HorizontalDivider()
+    SettingCheckbox("Cache card art on this device", ui.cacheArt, vm::setCacheArt)
+    Text(
+        "Off by default. When on, card art is saved to and read from the app's storage folder on this device, so cards keep their art offline. A fully filled cache uses a lot of storage.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -194,6 +207,13 @@ private fun PrinterSettings(
     }
     Text(status, fontWeight = FontWeight.Bold)
 
+    OutlinedButton(
+        onClick = vm::printTestTicket,
+        enabled = ui.printerState == BleTransport.State.READY,
+    ) {
+        Text("Print test ticket")
+    }
+
     Text("Print darkness: ${ui.blackening} (1 = light, 5 = dark)")
     Slider(
         value = ui.blackening.toFloat(),
@@ -203,6 +223,28 @@ private fun PrinterSettings(
     )
     Text(
         "Applies to the X6H printer.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    SettingCheckbox("Print automatically", ui.autoPrint, vm::setAutoPrint)
+    Text(
+        "Every rolled card and the emblem are printed right away while a printer is connected. The popup still shows the card.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    Text(
+        if (ui.extraFeedMm == 0) "Extra paper after each ticket: none" else "Extra paper after each ticket: ${ui.extraFeedMm} mm",
+    )
+    Slider(
+        value = ui.extraFeedMm.toFloat(),
+        onValueChange = { vm.setExtraFeedMm(it.roundToInt()) },
+        valueRange = 0f..SettingsStore.MAX_EXTRA_FEED_MM.toFloat(),
+        steps = SettingsStore.MAX_EXTRA_FEED_MM - 1,
+    )
+    Text(
+        "Blank space below the ticket, so it is easier to tear off.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -220,6 +262,16 @@ private fun UiSettings(
     ui: MainViewModel.UiState,
     vm: MainViewModel,
 ) {
+    Text("Theme")
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ThemeMode.entries.forEach { mode ->
+            FilterChip(
+                selected = ui.themeMode == mode,
+                onClick = { vm.setThemeMode(mode) },
+                label = { Text(mode.label) },
+            )
+        }
+    }
     SettingCheckbox("Rotate the top row's counters", ui.rotatePlayerOne, vm::setRotatePlayerOne)
     SettingCheckbox("Keep screen on", ui.keepScreenOn, vm::setKeepScreenOn)
     SettingCheckbox("Show card preview in the roll popup", ui.showPreviewImage, vm::setShowPreviewImage)
@@ -246,14 +298,17 @@ private fun DebugSettings(
     onClose: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
-    val matches = remember(query, ui.totalCreatures) { vm.searchCards(query) }
+    val classic = remember(query, ui.totalCreatures) { vm.searchCards(query) }
+    // Cards only in the custom format card data (non-creatures, newer cards), after the Classic ones.
+    val extra = remember(query, ui.cardPool.state, classic) {
+        vm.searchPoolCards(query, classic.map { it.name }.toSet())
+    }
+    val matches = classic + extra
 
     fun show(card: Creature) {
         vm.rollCard(card)
         onClose()
     }
-
-    CardPoolSettings(ui.cardPool, onDownload = vm::downloadCardPool)
 
     Text("Roll a specific card", fontWeight = FontWeight.Bold)
     Text(
@@ -268,7 +323,7 @@ private fun DebugSettings(
 
         matches.isEmpty() ->
             Text(
-                "No creature with that name in the card list.",
+                "No card with that name in the card data.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -283,8 +338,9 @@ private fun DebugSettings(
                     .padding(vertical = 6.dp),
             ) {
                 Text(card.name, fontWeight = FontWeight.SemiBold)
+                val source = if (card in extra) ", custom card data" else ""
                 Text(
-                    "MV ${card.manaValue}, ${card.type}$faces",
+                    "MV ${card.manaValue}, ${card.type}$faces$source",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

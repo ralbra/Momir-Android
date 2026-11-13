@@ -137,3 +137,37 @@ class CustomRoller(
 /** "NEO - Common": printed at the bottom of a ticket rolled in a custom format. */
 fun CustomRoll.footer(): String =
     "${set.code.uppercase()} - ${printing.rarity.name.lowercase().replaceFirstChar { it.uppercase() }}"
+
+/**
+ * Cards of [pool] whose name matches [query] (exact, then prefix, then anywhere), skipping
+ * names in [exclude]. Each card carries the set and rarity of its newest printing.
+ */
+fun searchPool(pool: CardPool, query: String, exclude: Set<String>, limit: Int = 8): List<com.momir.android.model.Creature> {
+    val q = query.trim().lowercase()
+    if (q.length < 2) return emptyList()
+    return pool.cards.asSequence()
+        .filter { it.card.name !in exclude }
+        .mapNotNull { card ->
+            val name = card.card.name.lowercase()
+            val parts = name.split(" // ")
+            val rank = when {
+                name == q || parts.any { it == q } -> 0
+                name.startsWith(q) || parts.any { it.startsWith(q) } -> 1
+                name.contains(q) -> 2
+                else -> null
+            }
+            rank?.let { it to card }
+        }
+        .sortedWith(compareBy({ it.first }, { it.second.card.name }))
+        .take(limit)
+        .map { (_, card) ->
+            // Sets are sorted newest first, so the lowest index is the newest printing.
+            val printing = card.printings.minByOrNull { it.setIndex }
+            if (printing == null) {
+                card.card
+            } else {
+                card.card.copy(footer = CustomRoll(card, printing, pool.sets[printing.setIndex]).footer())
+            }
+        }
+        .toList()
+}

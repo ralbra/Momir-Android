@@ -1,6 +1,12 @@
 package com.momir.android.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -99,8 +105,8 @@ fun StartScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
-                OutlinedButton(
-                    onClick = { onStartingLife(ui.startingLife - 1) },
+                RepeatButton(
+                    onStep = { big -> onStartingLife(lifeStep(ui.startingLife, -1, big)) },
                     enabled = ui.startingLife > SettingsStore.MIN_STARTING_LIFE,
                 ) { Text("\u2212") }
                 Text(
@@ -110,8 +116,8 @@ fun StartScreen(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.widthIn(min = 48.dp),
                 )
-                OutlinedButton(
-                    onClick = { onStartingLife(ui.startingLife + 1) },
+                RepeatButton(
+                    onStep = { big -> onStartingLife(lifeStep(ui.startingLife, 1, big)) },
                     enabled = ui.startingLife < SettingsStore.MAX_STARTING_LIFE,
                 ) { Text("+") }
             }
@@ -150,7 +156,7 @@ fun StartScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Edit") }
                     if (ui.cardPool.state != MainViewModel.CardPoolState.READY) {
-                        Hint("Custom formats need the custom format card data (Settings > Debug).")
+                        Hint("Custom formats need the custom format card data (Settings > Card data).")
                     }
                 }
             }
@@ -248,5 +254,52 @@ private fun Hint(text: String) {
         text = text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/** One step of the starting life: 1, or 5 to the next multiple of 5 while a button is held. */
+internal fun lifeStep(life: Int, direction: Int, big: Boolean): Int = when {
+    !big -> life + direction
+    direction > 0 -> (life / 5 + 1) * 5
+    else -> ((life - 1) / 5) * 5
+}.coerceIn(SettingsStore.MIN_STARTING_LIFE, SettingsStore.MAX_STARTING_LIFE)
+
+/**
+ * A button that steps once per tap and keeps stepping while held: by 1 at first, then in
+ * steps of 5 ([onStep] gets true for those).
+ */
+@Composable
+private fun RepeatButton(
+    onStep: (big: Boolean) -> Unit,
+    enabled: Boolean,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val step by rememberUpdatedState(onStep)
+    // Set once holding has stepped, so the click on release does not add another step.
+    var repeated by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pressed) {
+        if (!pressed) return@LaunchedEffect
+        repeated = false
+        delay(400)
+        var count = 0
+        while (true) {
+            repeated = true
+            step(count >= 6)
+            count++
+            delay(if (count > 6) 220 else 120)
+        }
+    }
+
+    OutlinedButton(
+        onClick = {
+            if (!repeated) step(false)
+            repeated = false
+        },
+        enabled = enabled,
+        interactionSource = interaction,
+        content = content,
     )
 }

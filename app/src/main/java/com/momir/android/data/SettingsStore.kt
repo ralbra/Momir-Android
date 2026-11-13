@@ -10,6 +10,9 @@ class SettingsStore(context: Context) {
         private const val KEY_BLACKENING = "blackening"
         private const val KEY_PREVIEW_MATCHES_PRINTER = "preview_matches_printer"
         private const val KEY_PRINT_ART = "print_art"
+        private const val KEY_AUTO_PRINT = "auto_print"
+        private const val KEY_EXTRA_FEED_MM = "extra_feed_mm"
+        private const val KEY_THEME = "theme"
         private const val KEY_STARTING_LIFE = "starting_life"
         private const val KEY_ROTATE_PLAYER_ONE = "rotate_player_one"
         private const val KEY_BAR_HEIGHT_PERCENT = "bar_height_percent"
@@ -25,6 +28,8 @@ class SettingsStore(context: Context) {
         const val DEFAULT_BLACKENING = 3
         const val DEFAULT_PREVIEW_MATCHES_PRINTER = true
         const val DEFAULT_PRINT_ART = true
+        const val DEFAULT_AUTO_PRINT = false
+        const val MAX_EXTRA_FEED_MM = 30
 
         const val MIN_STARTING_LIFE = 1
         const val MAX_STARTING_LIFE = 999
@@ -75,6 +80,27 @@ class SettingsStore(context: Context) {
         get() = prefs.getBoolean(KEY_PRINT_ART, DEFAULT_PRINT_ART)
         set(value) {
             prefs.edit { putBoolean(KEY_PRINT_ART, value) }
+        }
+
+    /** true: every rolled card (and the emblem) is printed right away. */
+    var autoPrint: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_PRINT, DEFAULT_AUTO_PRINT)
+        set(value) {
+            prefs.edit { putBoolean(KEY_AUTO_PRINT, value) }
+        }
+
+    /** Blank paper after each ticket, in millimetres. */
+    var extraFeedMm: Int
+        get() = prefs.getInt(KEY_EXTRA_FEED_MM, 0).coerceIn(0, MAX_EXTRA_FEED_MM)
+        set(value) {
+            prefs.edit { putInt(KEY_EXTRA_FEED_MM, value.coerceIn(0, MAX_EXTRA_FEED_MM)) }
+        }
+
+    /** "SYSTEM", "LIGHT" or "DARK" (see ThemeMode). */
+    var theme: String?
+        get() = prefs.getString(KEY_THEME, null)
+        set(value) {
+            prefs.edit { putString(KEY_THEME, value) }
         }
 
     /** Life total every player starts a new game with. */

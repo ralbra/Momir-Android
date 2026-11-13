@@ -8,7 +8,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.activity.SystemBarStyle
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.momir.android.ui.isDark
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -31,7 +35,19 @@ class MainActivity : ComponentActivity() {
         requestBtPermissions()
 
         setContent {
-            val darkTheme = isSystemInDarkTheme()
+            val ui by vm.ui.collectAsState()
+            val darkTheme = ui.themeMode.isDark()
+
+            // Status and navigation bar icons follow the app theme, not only the system one.
+            DisposableEffect(darkTheme) {
+                val style = if (darkTheme) {
+                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                }
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose {}
+            }
             val scheme = if (darkTheme) {
                 darkColorScheme(
                     primary = Color(0xFF88D4C2),

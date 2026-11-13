@@ -17,6 +17,7 @@ import com.momir.android.data.CustomFormatStore
 import com.momir.android.data.CustomRoller
 import com.momir.android.data.EmblemText
 import com.momir.android.data.footer
+import com.momir.android.data.searchPool
 import com.momir.android.data.SettingsStore
 import com.momir.android.model.CardPool
 import com.momir.android.model.Creature
@@ -26,6 +27,7 @@ import com.momir.android.printer.PrintOptions
 import com.momir.android.printer.PrinterDriver
 import com.momir.android.printer.PrinterDrivers
 import com.momir.android.render.CardRenderer
+import com.momir.android.render.ImageOps
 import com.momir.android.render.Monochrome
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +48,13 @@ private const val MAX_MANA_VALUE = 16
 private const val EMBLEM_NAME = "Factory of Momir Vig"
 private const val EMBLEM_TYPE = "Emblem"
 private const val EMBLEM_ART_NAME = "Momir Vig, Simic Visionary"
+
+/** The sample ticket printed from the printer settings; it borrows the emblem's art. */
+private const val TEST_TICKET_NAME = "Momir test ticket"
+
+/** Thermal printers print about 8 dots per millimetre (203 dpi). */
+private const val DOTS_PER_MM = 8
+
 
 // @JvmOverloads keeps a constructor that takes only the Application, which is what the
 // default ViewModel factory looks for; the other parameters can be replaced in tests.
@@ -78,6 +87,9 @@ class MainViewModel @JvmOverloads constructor(
         val blackening: Int = SettingsStore.DEFAULT_BLACKENING,
         val previewMatchesPrinter: Boolean = SettingsStore.DEFAULT_PREVIEW_MATCHES_PRINTER,
         val printArt: Boolean = SettingsStore.DEFAULT_PRINT_ART,
+        val autoPrint: Boolean = SettingsStore.DEFAULT_AUTO_PRINT,
+        val extraFeedMm: Int = 0,
+        val themeMode: ThemeMode = ThemeMode.SYSTEM,
         // Life counters and layout: one entry in [lives] per player
         val lives: List<Int> = List(SettingsStore.DEFAULT_PLAYER_COUNT) {
             SettingsStore.DEFAULT_STARTING_LIFE
@@ -139,6 +151,9 @@ class MainViewModel @JvmOverloads constructor(
             blackening = settings.blackening,
             previewMatchesPrinter = settings.previewMatchesPrinter,
             printArt = settings.printArt,
+            autoPrint = settings.autoPrint,
+            extraFeedMm = settings.extraFeedMm,
+            themeMode = ThemeMode.entries.firstOrNull { it.name == settings.theme } ?: ThemeMode.SYSTEM,
             lives = List(settings.playerCount) { settings.startingLife },
             startingLife = settings.startingLife,
             rotatePlayerOne = settings.rotatePlayerOne,
@@ -469,6 +484,7 @@ class MainViewModel @JvmOverloads constructor(
         if (showPreview) {
             generatePreview(emblem)
         }
+        autoPrint(emblem)
     }
 
     fun openStartScreen() {
@@ -526,6 +542,21 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(previewMatchesPrinter = v) }
         // Re-render the visible preview in the newly chosen style.
         refreshPreviewIfPrinterChanged()
+    }
+
+    fun setAutoPrint(v: Boolean) {
+        settings.autoPrint = v
+        _ui.update { it.copy(autoPrint = v) }
+    }
+
+    fun setExtraFeedMm(mm: Int) {
+        settings.extraFeedMm = mm
+        _ui.update { it.copy(extraFeedMm = settings.extraFeedMm) }
+    }
+
+    fun setThemeMode(mode: ThemeMode) {
+        settings.theme = mode.name
+        _ui.update { it.copy(themeMode = mode) }
     }
 
     fun setPrintArt(v: Boolean) {
@@ -610,10 +641,41 @@ class MainViewModel @JvmOverloads constructor(
 
     /** Debug: shows a chosen card in the roll popup, as if it had been rolled. */
     fun rollCard(card: Creature) {
-        presentCard(card, "Showing ${card.name}")
+        presentCard(card, "Showing ${card.name}", print = false)
     }
 
-    private fun presentCard(card: Creature, message: String) {
+    /** Debug: cards from the custom format card data that are not in [exclude], best matches first. */
+    fun searchPoolCards(query: String, exclude: Set<String>): List<Creature> =
+        cardPoolRepo.pool?.let { pool -> searchPool(pool, query, exclude) }.orEmpty()
+
+    /** Prints [card] right away when auto print is on and a printer is ready. */
+    private fun autoPrint(card: Creature) {
+        if (settings.autoPrint && !_ui.value.playWithoutPrinter && ble.state == BleTransport.State.READY) {
+            printCard(card)
+        }
+    }
+
+    /** Prints a sample ticket to check the darkness, the paper feed and the connection. */
+    fun printTestTicket() {
+        val state = _ui.value
+        val time = java.text.DateFormat.getDateTimeInstance().format(java.util.Date())
+        printCard(
+            Creature(
+                name = TEST_TICKET_NAME,
+                manaValue = 5,
+                type = "Printer test \u2014 ${state.printerName ?: "printer"}",
+                power = "5",
+                toughness = "5",
+                text = "Darkness ${state.blackening} of 5. Extra paper ${state.extraFeedMm} mm. " +
+                    "Art ${if (state.printArt) "on" else "off"}. Printed $time.",
+                manaCost = "{W}{U}{B}{R}{G}",
+                isFunny = false,
+                footer = "TEST - Common",
+            ),
+        )
+    }
+
+    private fun presentCard(card: Creature, message: String, print: Boolean = true) {
         val showPreview = _ui.value.showPreviewImage
 
         _ui.update {
@@ -629,6 +691,7 @@ class MainViewModel @JvmOverloads constructor(
         if (showPreview) {
             generatePreview(card)
         }
+        if (print) autoPrint(card)
     }
 
     fun dismissRollDialog() {
@@ -703,6 +766,10 @@ class MainViewModel @JvmOverloads constructor(
 
     fun printCurrentCard() {
         val card = _ui.value.card ?: return
+        printCard(card)
+    }
+
+    private fun printCard(card: Creature) {
         val driver = ble.target
 
         when (ble.state) {
@@ -738,7 +805,7 @@ class MainViewModel @JvmOverloads constructor(
             try {
                 say("Preparing ${card.name}...")
 
-                val image =
+                val ticket =
                     if (settings.previewMatchesPrinter) {
                         // Reuse the preview if it was rendered for this card and this printer,
                         // so the printout is exactly what was shown.
@@ -750,6 +817,7 @@ class MainViewModel @JvmOverloads constructor(
                         classicImage(card, driver)
                     }
 
+                val image = ImageOps.padBottom(ticket, settings.extraFeedMm * DOTS_PER_MM)
                 val commands = driver.encode(
                     image,
                     PrintOptions(darkness = _ui.value.blackening),
@@ -794,7 +862,7 @@ class MainViewModel @JvmOverloads constructor(
 
     /** The card whose art is used for [card]: the emblem borrows Momir Vig's art. */
     private fun artNameFor(card: Creature): String =
-        if (card.name == EMBLEM_NAME) EMBLEM_ART_NAME else card.name
+        if (card.name == EMBLEM_NAME || card.name == TEST_TICKET_NAME) EMBLEM_ART_NAME else card.name
 
     /**
      * Art for [card], cached for the most recent card. The back face art is only fetched for
@@ -929,3 +997,4 @@ internal fun formatNameProblem(format: CustomFormat, saved: List<CustomFormat>):
         else -> null
     }
 }
+

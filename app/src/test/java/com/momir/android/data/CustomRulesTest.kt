@@ -144,4 +144,21 @@ class CustomRulesTest {
         // No sorcery at MV 2: its 10% is shared, instants get 70/90.
         assertTrue("instants: $instants", instants in 7300..8250)
     }
+
+    @Test
+    fun searchPoolRanksAndSkipsClassicNames() {
+        val sets = listOf(CardSet("new", "New", "expansion", "2024-01-01"), CardSet("old", "Old", "expansion", "2000-01-01"))
+        fun named(name: String) = PoolCard(
+            card = Creature(name, 1, "Instant", "", "", "", "", false),
+            types = CardType.INSTANT.bit,
+            legendary = false,
+            legalFormats = LegalFormat.LEGACY.bit,
+            printings = listOf(Printing(1, Rarity.COMMON, false), Printing(0, Rarity.UNCOMMON, false)),
+        )
+        val pool = CardPool(sets, listOf(named("Lightning Bolt"), named("Bolt"), named("Boltwave"), named("Fire // Ice")), "x")
+        assertEquals(listOf("Bolt", "Boltwave", "Lightning Bolt"), searchPool(pool, "bolt", emptySet()).map { it.name })
+        assertEquals(listOf("Boltwave", "Lightning Bolt"), searchPool(pool, "bolt", setOf("Bolt")).map { it.name })
+        assertEquals("NEW - Uncommon", searchPool(pool, "ice", emptySet()).single().footer)
+        assertTrue(searchPool(pool, "b", emptySet()).isEmpty())
+    }
 }

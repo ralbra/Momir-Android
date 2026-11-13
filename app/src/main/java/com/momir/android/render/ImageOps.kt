@@ -7,6 +7,16 @@ import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 
 object ImageOps {
+    /** Adds [extra] white rows below [bitmap]: blank paper after the ticket. */
+    fun padBottom(bitmap: Bitmap, extra: Int): Bitmap {
+        if (extra <= 0) return bitmap
+        val out = createBitmap(bitmap.width, bitmap.height + extra)
+        val canvas = Canvas(out)
+        canvas.drawColor(Color.WHITE)
+        canvas.drawBitmap(bitmap, 0f, 0f, null)
+        return out
+    }
+
     fun resizeToWidth(bitmap: Bitmap, width: Int): Bitmap {
         if (bitmap.width == width) return bitmap
 

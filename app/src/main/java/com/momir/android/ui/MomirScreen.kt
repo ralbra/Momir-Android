@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -66,7 +65,7 @@ fun MomirScreen(
     onRequestPermissions: () -> Unit,
 ) {
     val ui by vm.ui.collectAsState()
-    val darkTheme = isSystemInDarkTheme()
+    val darkTheme = ui.themeMode.isDark()
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showEndGame by rememberSaveable { mutableStateOf(false) }
     val snackbarHost = remember { SnackbarHostState() }
