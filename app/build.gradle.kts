@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.momir.android"
+    namespace = "io.github.ralbra.randomize_the_gathering"
     compileSdk = 37
 
     val hasReleaseSigning = listOf(
@@ -15,7 +15,7 @@ android {
     ).all { !System.getenv(it).isNullOrBlank() }
 
     defaultConfig {
-        applicationId = "com.momir.android"
+        applicationId = "io.github.ralbra.randomize_the_gathering"
         minSdk = 28
         targetSdk = 37
         versionCode = 1

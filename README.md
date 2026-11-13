@@ -107,7 +107,7 @@ matches it. See `PRINTER_SUPPORT.md` for the information needed to add support f
 
 ## Adding a Printer
 
-1. Add a driver in `app/src/main/java/com/momir/android/printer/` (implement `PrinterDriver`: GATT
+1. Add a driver in `app/src/main/java/io/github/ralbra/randomize_the_gathering/printer/` (implement `PrinterDriver`: GATT
    UUIDs, name matching, image preparation, encoding, flow control).
 2. Register it in `PrinterDrivers`. Put it before any driver whose name pattern overlaps.
 
