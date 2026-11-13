@@ -85,8 +85,9 @@ fun StartScreen(
                 onSelect = onPlayerCount,
             )
 
-            val choices = listOf(FormatChoice.Classic, FormatChoice.NewCustom) +
-                ui.customFormats.map { FormatChoice.Custom(it.id) }
+            val choices = listOf(FormatChoice.Classic) +
+                ui.customFormats.map { FormatChoice.Custom(it.id) } +
+                FormatChoice.NewCustom
             val formatName: (FormatChoice) -> String = { choice ->
                 when (choice) {
                     FormatChoice.Classic -> "Classic"
@@ -117,7 +118,9 @@ fun StartScreen(
                         onClick = { onOpenWizard(choice.id) },
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text("Edit") }
-                    Hint("Rolling from custom formats comes in the next update; a standard game is played for now.")
+                    if (ui.cardPool.state != MainViewModel.CardPoolState.READY) {
+                        Hint("Custom formats need the custom format card data (Settings > Debug).")
+                    }
                 }
             }
 
@@ -154,7 +157,11 @@ fun StartScreen(
 
             Button(
                 onClick = onStartGame,
-                enabled = !ui.loading && ui.formatChoice != FormatChoice.NewCustom,
+                enabled = !ui.loading && when (ui.formatChoice) {
+                    FormatChoice.Classic -> true
+                    FormatChoice.NewCustom -> false
+                    is FormatChoice.Custom -> ui.cardPool.state == MainViewModel.CardPoolState.READY
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),

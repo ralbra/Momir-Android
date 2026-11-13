@@ -14,6 +14,9 @@ import com.momir.android.data.CardPoolBootstrapper
 import com.momir.android.data.CardPoolRepository
 import com.momir.android.data.CardRepository
 import com.momir.android.data.CustomFormatStore
+import com.momir.android.data.CustomRoller
+import com.momir.android.data.EmblemText
+import com.momir.android.data.footer
 import com.momir.android.data.SettingsStore
 import com.momir.android.model.CardPool
 import com.momir.android.model.Creature
@@ -166,6 +169,10 @@ class MainViewModel @JvmOverloads constructor(
     private val cardPoolRepo = CardPoolRepository(CardPoolBootstrapper(app.filesDir))
 
     private val printInProgress = AtomicBoolean(false)
+
+    /** Rolls for the selected custom format; rebuilt when the format or the card data changes. */
+    @Volatile
+    private var customRoller: CustomRoller? = null
 
     // The art of the current card, so a printer change does not download it again.
     @Volatile
@@ -444,7 +451,12 @@ class MainViewModel @JvmOverloads constructor(
      * first, in the same popup as a rolled card, so it can be printed.
      */
     fun startGame() {
-        val emblem = emblemCard()
+        val format = selectedCustomFormat()
+        val emblem = if (format != null) customEmblemCard(format) else emblemCard()
+        if (format != null) {
+            // Sort the format's cards by mana value now, so the first roll is instant.
+            rollerFor(format)?.let { roller -> viewModelScope.launch(Dispatchers.Default) { roller.warmUp() } }
+        }
         val showPreview = _ui.value.showPreviewImage
 
         _ui.update { state ->
@@ -479,6 +491,24 @@ class MainViewModel @JvmOverloads constructor(
         manaCost = "",
         isFunny = false,
     )
+
+    /** The emblem of a custom format: the text follows the format's options. */
+    private fun customEmblemCard(format: CustomFormat): Creature = Creature(
+        name = EMBLEM_NAME,
+        manaValue = 0,
+        type = "$EMBLEM_TYPE \u2014 ${format.name}",
+        power = "",
+        toughness = "",
+        text = EmblemText.forFormat(format),
+        manaCost = "",
+        isFunny = false,
+    )
+
+    private fun rollerFor(format: CustomFormat): CustomRoller? {
+        val pool = cardPoolRepo.pool ?: return null
+        customRoller?.takeIf { it.isFor(pool, format) }?.let { return it }
+        return CustomRoller(pool, format).also { customRoller = it }
+    }
 
     /** For the future editing screen: an empty text brings back the default. */
     fun setEmblemText(text: String) {
@@ -520,6 +550,10 @@ class MainViewModel @JvmOverloads constructor(
 
     fun roll() {
         val state = _ui.value
+        selectedCustomFormat(state)?.let { format ->
+            rollCustom(format, state.selectedMv)
+            return
+        }
         val c = repo.getRandomCreature(state.selectedMv, state.includeFunny)
 
         if (c == null) {
@@ -536,6 +570,36 @@ class MainViewModel @JvmOverloads constructor(
         }
 
         presentCard(c, "Rolled ${c.name}")
+    }
+
+    private fun rollCustom(format: CustomFormat, manaValue: Int) {
+        val roller = rollerFor(format)
+        val rolled = roller?.roll(manaValue)
+        if (rolled == null) {
+            _ui.update {
+                it.copy(
+                    card = null,
+                    imageUrl = null,
+                    previewBitmap = null,
+                    showRollDialog = true,
+                    message = if (roller == null) {
+                        "The custom format card data is not loaded"
+                    } else {
+                        "No cards at MV $manaValue in ${format.name}"
+                    },
+                )
+            }
+            return
+        }
+
+        val card = rolled.card.card.copy(footer = rolled.footer())
+        val rarity = rolled.printing.rarity.name.lowercase()
+        val message = if (format.drawOnCommon && rolled.isCommon) {
+            "Rolled ${card.name} (common): draw a card"
+        } else {
+            "Rolled ${card.name} ($rarity)"
+        }
+        presentCard(card, message)
     }
 
     /** Debug: cards whose name matches [query], best matches first. */

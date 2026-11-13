@@ -25,4 +25,6 @@ data class Creature(
     val extraFaces: List<CardFace> = emptyList(),
     /** True when the second face has its own artwork (transform, modal double-faced). */
     val backHasOwnArt: Boolean = false,
+    /** Small print at the bottom of the front face, e.g. the set and rarity of the printing. */
+    val footer: String = "",
 )

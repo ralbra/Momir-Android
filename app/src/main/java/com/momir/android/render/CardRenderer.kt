@@ -37,6 +37,7 @@ object CardRenderer {
             text = creature.text,
             artBitmap = artBitmap,
             printWidth = printWidth,
+            footer = creature.footer,
         )
         if (creature.extraFaces.isEmpty()) return front
 
@@ -94,6 +95,7 @@ object CardRenderer {
         text: String,
         artBitmap: Bitmap?,
         printWidth: Int,
+        footer: String = "",
     ): Bitmap {
         val namePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = 36f
@@ -122,7 +124,9 @@ object CardRenderer {
         val nameLineHeight = 40f
         val typeLineHeight = 30f
         val hasPt = power.isNotBlank() && toughness.isNotBlank()
-        val ptHeight = if (hasPt) 42f else 0f
+        val hasFooter = footer.isNotBlank()
+        // The footer shares the bottom row with power / toughness.
+        val ptHeight = if (hasPt || hasFooter) 42f else 0f
 
         val manaText = if (COMPACT_MANA) compactMana(manaCost) else manaCost
         val manaWidth = if (manaText.isNotBlank()) namePaint.measureText(manaText) else 0f
@@ -197,6 +201,9 @@ object CardRenderer {
             y += 8f
         }
 
+        if (hasFooter) {
+            canvas.drawText(footer, PADDING, y + 30f, typePaint)
+        }
         if (hasPt) {
             val pt = "$power / $toughness"
             val pw = ptPaint.measureText(pt)
