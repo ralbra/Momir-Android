@@ -13,9 +13,12 @@ import com.momir.android.data.AtomicBootstrapper
 import com.momir.android.data.CardPoolBootstrapper
 import com.momir.android.data.CardPoolRepository
 import com.momir.android.data.CardRepository
+import com.momir.android.data.CustomFormatStore
 import com.momir.android.data.SettingsStore
 import com.momir.android.model.CardPool
 import com.momir.android.model.Creature
+import com.momir.android.model.CustomFormat
+import com.momir.android.model.FormatChoice
 import com.momir.android.printer.PrintOptions
 import com.momir.android.printer.PrinterDriver
 import com.momir.android.printer.PrinterDrivers
@@ -28,6 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Width of the grayscale preview shown while no printer is connected (or in classic mode). */
@@ -46,6 +50,7 @@ class MainViewModel @JvmOverloads constructor(
     app: Application,
     private val artRepository: ArtRepository = ArtRepository(app),
     private val settings: SettingsStore = SettingsStore(app),
+    private val formatStore: CustomFormatStore = CustomFormatStore(app),
 ) : AndroidViewModel(app) {
     enum class BootstrapMode {
         INITIAL,
@@ -83,7 +88,13 @@ class MainViewModel @JvmOverloads constructor(
         // Start screen
         val showStartScreen: Boolean = true,
         val playerCount: Int = SettingsStore.DEFAULT_PLAYER_COUNT,
-        val momirFormat: MomirFormat = MomirFormat.CLASSIC,
+        val formatChoice: FormatChoice = FormatChoice.Classic,
+        /** Saved custom formats, in the order they were made. */
+        val customFormats: List<CustomFormat> = emptyList(),
+        /** The format being edited in the wizard; null while the wizard is closed. */
+        val wizardDraft: CustomFormat? = null,
+        /** The saved version of [wizardDraft], or null for a new format. */
+        val wizardOriginal: CustomFormat? = null,
         val playWithoutPrinter: Boolean = SettingsStore.DEFAULT_PLAY_WITHOUT_PRINTER,
         // Card data for custom formats (Scryfall), separate from the Classic creature list
         val cardPool: CardPoolStatus = CardPoolStatus(),
@@ -131,8 +142,8 @@ class MainViewModel @JvmOverloads constructor(
             keepScreenOn = settings.keepScreenOn,
             cacheArt = settings.cacheArt,
             playerCount = settings.playerCount,
-            momirFormat = MomirFormat.values().firstOrNull { it.name == settings.momirFormat }
-                ?: MomirFormat.CLASSIC,
+            customFormats = formatStore.load(),
+            formatChoice = validChoice(FormatChoice.fromKey(settings.momirFormat), formatStore.load()),
             playWithoutPrinter = settings.playWithoutPrinter,
         ),
     )
@@ -362,9 +373,65 @@ class MainViewModel @JvmOverloads constructor(
         _ui.update { it.copy(playerCount = settings.playerCount) }
     }
 
-    fun setMomirFormat(format: MomirFormat) {
-        settings.momirFormat = format.name
-        _ui.update { it.copy(momirFormat = format) }
+    fun setFormatChoice(choice: FormatChoice) {
+        val valid = validChoice(choice, _ui.value.customFormats)
+        settings.momirFormat = valid.key
+        _ui.update { it.copy(formatChoice = valid) }
+    }
+
+    /** The selected custom format, or null for Classic and New Custom Game. */
+    fun selectedCustomFormat(): CustomFormat? = selectedCustomFormat(_ui.value)
+
+    /** The custom format card data, or null while it is not downloaded or still loading. */
+    fun cardPool(): CardPool? = cardPoolRepo.pool
+
+    /** Opens the wizard: for a new format with [id] null, otherwise to edit the saved one. */
+    fun openWizard(id: String? = null) {
+        val saved = id?.let { wanted -> _ui.value.customFormats.firstOrNull { it.id == wanted } }
+        val draft = saved ?: CustomFormat(id = UUID.randomUUID().toString())
+        _ui.update { it.copy(wizardDraft = draft, wizardOriginal = saved) }
+    }
+
+    fun updateDraft(transform: (CustomFormat) -> CustomFormat) {
+        _ui.update { state -> state.copy(wizardDraft = state.wizardDraft?.let(transform)) }
+    }
+
+    /** Saves the wizard's format and selects it. Does nothing if the name is missing or taken. */
+    fun saveDraft() {
+        val draft = _ui.value.wizardDraft ?: return
+        val format = draft.copy(name = draft.name.trim())
+        if (formatNameProblem(format, _ui.value.customFormats) != null || !format.hasCardType) return
+        val list = formatStore.save(format)
+        settings.momirFormat = FormatChoice.Custom(format.id).key
+        _ui.update {
+            it.copy(
+                customFormats = list,
+                formatChoice = FormatChoice.Custom(format.id),
+                wizardDraft = null,
+                wizardOriginal = null,
+                message = "Saved format ${format.name}",
+            )
+        }
+    }
+
+    /** Deletes the format being edited and goes back to Classic. */
+    fun deleteDraftFormat() {
+        val original = _ui.value.wizardOriginal ?: return
+        val list = formatStore.delete(original.id)
+        settings.momirFormat = FormatChoice.Classic.key
+        _ui.update {
+            it.copy(
+                customFormats = list,
+                formatChoice = FormatChoice.Classic,
+                wizardDraft = null,
+                wizardOriginal = null,
+                message = "Deleted format ${original.name}",
+            )
+        }
+    }
+
+    fun closeWizard() {
+        _ui.update { it.copy(wizardDraft = null, wizardOriginal = null) }
     }
 
     fun setPlayWithoutPrinter(v: Boolean) {
@@ -771,5 +838,23 @@ class MainViewModel @JvmOverloads constructor(
     override fun onCleared() {
         super.onCleared()
         ble.disconnect()
+    }
+}
+/** A saved custom id that no longer exists falls back to Classic. */
+private fun validChoice(choice: FormatChoice, formats: List<CustomFormat>): FormatChoice =
+    if (choice is FormatChoice.Custom && formats.none { it.id == choice.id }) FormatChoice.Classic else choice
+
+internal fun selectedCustomFormat(state: MainViewModel.UiState): CustomFormat? =
+    (state.formatChoice as? FormatChoice.Custom)?.let { c -> state.customFormats.firstOrNull { it.id == c.id } }
+
+/** Why [format] cannot be saved under its name, or null if the name is fine. */
+internal fun formatNameProblem(format: CustomFormat, saved: List<CustomFormat>): String? {
+    val name = format.name.trim()
+    return when {
+        name.isEmpty() -> "Enter a name to save the format"
+        name.equals("Classic", ignoreCase = true) -> "\"Classic\" is taken by the standard format"
+        saved.any { it.id != format.id && it.name.trim().equals(name, ignoreCase = true) } ->
+            "A format named \"$name\" already exists"
+        else -> null
     }
 }

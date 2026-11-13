@@ -117,7 +117,7 @@ fun SettingsDialog(
 }
 
 @Composable
-private fun AccordionSection(
+internal fun AccordionSection(
     title: String,
     expanded: Boolean,
     onToggle: () -> Unit,
@@ -328,7 +328,7 @@ private fun DebugSettings(
 
 /** Status of the custom format card data, with a download / update button behind a warning. */
 @Composable
-private fun CardPoolSettings(
+internal fun CardPoolSettings(
     status: MainViewModel.CardPoolStatus,
     onDownload: () -> Unit,
 ) {
@@ -385,7 +385,7 @@ private fun CardPoolSettings(
 }
 
 @Composable
-private fun SettingCheckbox(
+internal fun SettingCheckbox(
     label: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,

@@ -33,18 +33,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.momir.android.ble.BleTransport
+import com.momir.android.model.FormatChoice
 
-enum class MomirFormat(val label: String) {
-    CLASSIC("Classic"),
-    NEW_CUSTOM("New Custom"),
-}
+private const val NEW_CUSTOM_LABEL = "<-- New Custom Game -->"
 
 /** Shown on launch: choose players and format, connect the printer, then start the game. */
 @Composable
 fun StartScreen(
     ui: MainViewModel.UiState,
     onPlayerCount: (Int) -> Unit,
-    onFormat: (MomirFormat) -> Unit,
+    onFormat: (FormatChoice) -> Unit,
+    /** Opens the wizard: a new format for null, otherwise the saved format with this id. */
+    onOpenWizard: (String?) -> Unit,
     onPlayWithoutPrinter: (Boolean) -> Unit,
     onConnectPrinter: () -> Unit,
     onStartGame: () -> Unit,
@@ -85,35 +85,40 @@ fun StartScreen(
                 onSelect = onPlayerCount,
             )
 
+            val choices = listOf(FormatChoice.Classic, FormatChoice.NewCustom) +
+                ui.customFormats.map { FormatChoice.Custom(it.id) }
+            val formatName: (FormatChoice) -> String = { choice ->
+                when (choice) {
+                    FormatChoice.Classic -> "Classic"
+                    FormatChoice.NewCustom -> NEW_CUSTOM_LABEL
+                    is FormatChoice.Custom ->
+                        ui.customFormats.firstOrNull { it.id == choice.id }?.name ?: "Unknown format"
+                }
+            }
             DropdownField(
                 label = "Momir format",
-                value = ui.momirFormat.label,
-                options = MomirFormat.values().toList(),
-                optionLabel = { it.label },
+                value = formatName(ui.formatChoice),
+                options = choices,
+                optionLabel = formatName,
                 onSelect = onFormat,
             )
 
-            if (ui.momirFormat == MomirFormat.NEW_CUSTOM) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+            when (val choice = ui.formatChoice) {
+                FormatChoice.Classic -> Unit
+                FormatChoice.NewCustom -> {
                     OutlinedButton(
-                        onClick = {},
-                        enabled = false,
-                        modifier = Modifier.weight(1f),
+                        onClick = { onOpenWizard(null) },
+                        modifier = Modifier.fillMaxWidth(),
                     ) { Text("Start wizard") }
-                    OutlinedButton(
-                        onClick = {},
-                        enabled = false,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Edit") }
+                    Hint("Create the format with the wizard first")
                 }
-                Text(
-                    text = "Custom formats are not available yet. A standard game is played.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                is FormatChoice.Custom -> {
+                    OutlinedButton(
+                        onClick = { onOpenWizard(choice.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Edit") }
+                    Hint("Rolling from custom formats comes in the next update; a standard game is played for now.")
+                }
             }
 
             val printerLabel = when (ui.printerState) {
@@ -149,7 +154,7 @@ fun StartScreen(
 
             Button(
                 onClick = onStartGame,
-                enabled = !ui.loading,
+                enabled = !ui.loading && ui.formatChoice != FormatChoice.NewCustom,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -197,4 +202,13 @@ private fun <T> DropdownField(
             }
         }
     }
+}
+
+@Composable
+private fun Hint(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }

@@ -111,7 +111,8 @@ fun MomirScreen(
             StartScreen(
                 ui = ui,
                 onPlayerCount = vm::setPlayerCount,
-                onFormat = vm::setMomirFormat,
+                onFormat = vm::setFormatChoice,
+                onOpenWizard = vm::openWizard,
                 onPlayWithoutPrinter = vm::setPlayWithoutPrinter,
                 onConnectPrinter = {
                     if (ui.printerState == BleTransport.State.DISCONNECTED) {
@@ -197,6 +198,14 @@ fun MomirScreen(
             ui = ui,
             onClose = vm::dismissRollDialog,
             onAction = connectOrPrint,
+        )
+    }
+
+    ui.wizardDraft?.let { draft ->
+        FormatWizard(
+            ui = ui,
+            draft = draft,
+            vm = vm,
         )
     }
 
