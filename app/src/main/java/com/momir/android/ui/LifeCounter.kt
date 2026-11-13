@@ -1,7 +1,9 @@
 package com.momir.android.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -24,12 +26,13 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-private const val TAP_STEP = 1
-private const val LONG_PRESS_STEP = 5
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * Tap = 1, long press = 5.
+ * Tap = 1. Holding repeats like the starting life buttons: by 1 at first, then to the next
+ * multiple of 5.
  * Full-width tile: left half is minus, right half is plus.
  * With [stackedControls] (two or more counters share a row, so each tile is narrow): top half
  * is plus, bottom half is minus, because side-by-side areas would get too small to hit.
@@ -50,17 +53,18 @@ fun LifeCounter(
 ) {
     val haptics = LocalHapticFeedback.current
     val lifeText = life.toString()
+    val currentLife by rememberUpdatedState(life)
+    val delta by rememberUpdatedState(onDelta)
 
-    val tapMinus = { onDelta(-TAP_STEP) }
-    val tapPlus = { onDelta(TAP_STEP) }
-    val longMinus = {
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        onDelta(-LONG_PRESS_STEP)
+    // Steps from the current life, so holding lands on multiples of 5.
+    fun step(direction: Int, big: Boolean) {
+        if (big) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        delta(holdStep(currentLife, direction, big) - currentLife)
     }
-    val longPlus = {
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-        onDelta(LONG_PRESS_STEP)
-    }
+
+    val minus: (Boolean) -> Unit = { big -> step(-1, big) }
+    val plus: (Boolean) -> Unit = { big -> step(1, big) }
+    val holdStarted = { haptics.performHapticFeedback(HapticFeedbackType.LongPress) }
 
     BoxWithConstraints(
         modifier = modifier
@@ -78,15 +82,15 @@ fun LifeCounter(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    onTap = tapPlus,
-                    onLongPress = longPlus,
+                    onStep = plus,
+                    onHoldStart = holdStarted,
                 )
                 TapZone(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    onTap = tapMinus,
-                    onLongPress = longMinus,
+                    onStep = minus,
+                    onHoldStart = holdStarted,
                 )
             }
         } else {
@@ -96,15 +100,15 @@ fun LifeCounter(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    onTap = tapMinus,
-                    onLongPress = longMinus,
+                    onStep = minus,
+                    onHoldStart = holdStarted,
                 )
                 TapZone(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(),
-                    onTap = tapPlus,
-                    onLongPress = longPlus,
+                    onStep = plus,
+                    onHoldStart = holdStarted,
                 )
             }
         }
@@ -152,20 +156,37 @@ fun LifeCounter(
     }
 }
 
+/** Steps once per tap and keeps stepping while held ([onStep] gets true for steps of 5). */
 @Composable
 private fun TapZone(
     modifier: Modifier,
-    onTap: () -> Unit,
-    onLongPress: () -> Unit,
+    onStep: (big: Boolean) -> Unit,
+    onHoldStart: () -> Unit,
 ) {
-    val tap by rememberUpdatedState(onTap)
-    val longPress by rememberUpdatedState(onLongPress)
+    val step by rememberUpdatedState(onStep)
+    val holdStart by rememberUpdatedState(onHoldStart)
     Box(
         modifier = modifier.pointerInput(Unit) {
-            detectTapGestures(
-                onTap = { tap() },
-                onLongPress = { longPress() },
-            )
+            coroutineScope {
+                awaitEachGesture {
+                    awaitFirstDown()
+                    var repeated = false
+                    val repeat = launch {
+                        delay(HOLD_START_MS)
+                        holdStart()
+                        var count = 0
+                        while (true) {
+                            repeated = true
+                            step(count >= HOLD_SMALL_STEPS)
+                            count++
+                            delay(holdDelayMs(count))
+                        }
+                    }
+                    val up = waitForUpOrCancellation()
+                    repeat.cancel()
+                    if (up != null && !repeated) step(false)
+                }
+            }
         },
     )
 }

@@ -258,11 +258,8 @@ private fun Hint(text: String) {
 }
 
 /** One step of the starting life: 1, or 5 to the next multiple of 5 while a button is held. */
-internal fun lifeStep(life: Int, direction: Int, big: Boolean): Int = when {
-    !big -> life + direction
-    direction > 0 -> (life / 5 + 1) * 5
-    else -> ((life - 1) / 5) * 5
-}.coerceIn(SettingsStore.MIN_STARTING_LIFE, SettingsStore.MAX_STARTING_LIFE)
+internal fun lifeStep(life: Int, direction: Int, big: Boolean): Int =
+    holdStep(life, direction, big).coerceIn(SettingsStore.MIN_STARTING_LIFE, SettingsStore.MAX_STARTING_LIFE)
 
 /**
  * A button that steps once per tap and keeps stepping while held: by 1 at first, then in
@@ -283,13 +280,13 @@ private fun RepeatButton(
     LaunchedEffect(pressed) {
         if (!pressed) return@LaunchedEffect
         repeated = false
-        delay(400)
+        delay(HOLD_START_MS)
         var count = 0
         while (true) {
             repeated = true
-            step(count >= 6)
+            step(count >= HOLD_SMALL_STEPS)
             count++
-            delay(if (count > 6) 220 else 120)
+            delay(holdDelayMs(count))
         }
     }
 
